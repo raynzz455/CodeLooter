@@ -1,43 +1,42 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Header } from "@/components/Header";
 import { LanguagePanel } from "@/components/LanguagePanel";
 import { UploadPanel } from "@/components/UploadPanel";
 import { ResultPanel } from "@/components/ResultPanel";
 import { RecentFiles } from "@/components/RecentFiles";
 import { STATS } from "@/components/data";
+import type { CodeBlock } from "@/types";
 
-// Accepted MIME types and extensions
-const ACCEPTED_TYPES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain",
-  "text/markdown",
-  "text/html",
-  "application/json",
-];
 const ACCEPTED_EXT = /\.(pdf|doc|docx|pptx?|xlsx?|txt|md|html|ipynb|tex)$/i;
 
 function isAccepted(file: File) {
-  return ACCEPTED_TYPES.includes(file.type) || ACCEPTED_EXT.test(file.name);
+  return ACCEPTED_EXT.test(file.name);
 }
 
 export default function Home() {
-  const [selectedLang, setSelectedLang] = useState("python");
-  const [uploadedFile, setUploadedFile]  = useState<File | null>(null);
-  const [isDragging, setIsDragging]      = useState(false);
-  const [isExtracting, setIsExtracting]  = useState(false);
-  const [extracted, setExtracted]        = useState(false);
+  const [selectedLang, setSelectedLang]       = useState("python");
+  const [uploadedFile, setUploadedFile]       = useState<File | null>(null);
+  const [isDragging, setIsDragging]           = useState(false);
+  const [isExtracting, setIsExtracting]       = useState(false);
+  const [extractedBlocks, setExtractedBlocks] = useState<CodeBlock[]>([]);
+  const [extractError, setExtractError]       = useState<string | null>(null);
+
+  // Listen for lang selection from ResultPanel tabs
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const lang = (e as CustomEvent<string>).detail;
+      if (lang) setSelectedLang(lang);
+    };
+    document.addEventListener("codelooter:selectlang", handler);
+    return () => document.removeEventListener("codelooter:selectlang", handler);
+  }, []);
 
   const setFile = (file: File | null) => {
     setUploadedFile(file);
-    setExtracted(false);
+    setExtractedBlocks([]);
+    setExtractError(null);
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -52,15 +51,43 @@ export default function Home() {
     if (file) setFile(file);
   };
 
-  const handleExtract = () => {
+  const handleExtract = async () => {
     if (!uploadedFile) return;
     setIsExtracting(true);
-    // TODO: replace with real API call to /api/extract
-    setTimeout(() => {
+    setExtractError(null);
+    setExtractedBlocks([]);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", uploadedFile);
+
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setExtractError(data.error ?? "Gagal mengekstrak kode");
+        return;
+      }
+
+      const blocks: CodeBlock[] = data.blocks ?? [];
+      setExtractedBlocks(blocks);
+
+      // Auto-select first detected language
+      if (blocks.length > 0 && blocks[0].lang !== "unknown") {
+        setSelectedLang(blocks[0].lang);
+      }
+    } catch {
+      setExtractError("Koneksi gagal — coba lagi");
+    } finally {
       setIsExtracting(false);
-      setExtracted(true);
-    }, 1800);
+    }
   };
+
+  const extracted = extractedBlocks.length > 0;
 
   return (
     <div
@@ -110,6 +137,7 @@ export default function Home() {
           <LanguagePanel
             selectedLang={selectedLang}
             onSelect={setSelectedLang}
+            detectedLangs={extractedBlocks.map((b) => b.lang)}
           />
           <UploadPanel
             uploadedFile={uploadedFile}
@@ -126,7 +154,8 @@ export default function Home() {
           <ResultPanel
             selectedLang={selectedLang}
             isExtracting={isExtracting}
-            extracted={extracted}
+            extractedBlocks={extractedBlocks}
+            extractError={extractError}
           />
         </div>
 

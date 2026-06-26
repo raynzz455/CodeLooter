@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, Code2 } from "lucide-react";
 import { Card, CardHeader } from "./ui";
 import { LANGUAGES } from "./data";
@@ -9,18 +9,31 @@ import type { Language } from "@/types";
 interface LanguagePanelProps {
   selectedLang: string;
   onSelect: (id: string) => void;
+  detectedLangs: string[]; // langs found in the extracted document
 }
 
-export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
+export function LanguagePanel({ selectedLang, onSelect, detectedLangs }: LanguagePanelProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const currentLang = LANGUAGES.find((l) => l.id === selectedLang) as Language;
+  const currentLang = (LANGUAGES.find((l) => l.id === selectedLang) ?? LANGUAGES[0]) as Language;
+
+  // Listen for tab clicks from ResultPanel
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const lang = (e as CustomEvent<string>).detail;
+      if (lang) onSelect(lang);
+    };
+    document.addEventListener("codelooter:selectlang", handler);
+    return () => document.removeEventListener("codelooter:selectlang", handler);
+  }, [onSelect]);
+
+  const hasDetected = detectedLangs.length > 0;
 
   return (
     <Card>
       <CardHeader bg="#ffe8a3">
         <Code2 size={16} />
         <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", letterSpacing: "0.05em" }}>
-          PILIH BAHASA
+          BAHASA
         </span>
       </CardHeader>
 
@@ -35,8 +48,58 @@ export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
           fontFamily: "var(--font-body)",
         }}
       >
-        {/* Dropdown trigger */}
+        {/* Detected langs (after extraction) */}
+        {hasDetected && (
+          <div
+            style={{
+              backgroundColor: "#d4f0e4",
+              border: "2px solid #000",
+              borderRadius: "10px",
+              padding: "10px 12px",
+            }}
+          >
+            <p style={{ fontSize: "0.65rem", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "7px", marginTop: 0 }}>
+              🔍 Terdeteksi
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+              {detectedLangs.map((id) => {
+                const lang = LANGUAGES.find((l) => l.id === id);
+                const isActive = id === selectedLang;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => onSelect(id)}
+                    style={{
+                      backgroundColor: isActive ? (lang?.color ?? "#ffe8a3") : "#fff",
+                      border: "2px solid #000",
+                      borderRadius: "8px",
+                      padding: "4px 10px",
+                      fontSize: "0.75rem",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      boxShadow: isActive ? "2px 2px 0 #000" : "none",
+                      transform: isActive ? "translate(1px,1px)" : "",
+                      fontFamily: "var(--font-body)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      transition: "all 0.1s",
+                    }}
+                  >
+                    <span>{lang?.emoji ?? "📄"}</span>
+                    {lang?.label ?? id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Dropdown — manual override */}
         <div style={{ position: "relative" }}>
+          <p style={{ fontSize: "0.65rem", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px", marginTop: 0, color: "#555" }}>
+            {hasDetected ? "Override manual" : "Pilih bahasa"}
+          </p>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             style={{
@@ -96,7 +159,7 @@ export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
                     padding: "10px 14px",
                     backgroundColor: lang.id === selectedLang ? lang.color : "#fff",
                     border: "none",
-                    borderBottom: idx < LANGUAGES.length - 1 ? "2px solid #000" : "none",
+                    borderBottom: idx < LANGUAGES.length - 1 ? "2px solid #eee" : "none",
                     textAlign: "left",
                     cursor: "pointer",
                     display: "flex",
@@ -105,7 +168,6 @@ export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
                     fontWeight: 800,
                     fontSize: "0.88rem",
                     fontFamily: "var(--font-body)",
-                    transition: "background-color 0.1s",
                   }}
                   onMouseEnter={(e) => {
                     if (lang.id !== selectedLang)
@@ -124,24 +186,6 @@ export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
           )}
         </div>
 
-        {/* Language info */}
-        <div
-          style={{
-            backgroundColor: currentLang.color,
-            border: "2px solid #000",
-            borderRadius: "10px",
-            padding: "12px",
-            marginTop: "4px",
-          }}
-        >
-          <p style={{ fontFamily: "var(--font-display)", fontSize: "1.3rem", letterSpacing: "0.04em", lineHeight: 1, margin: 0 }}>
-            {currentLang.emoji} {currentLang.label}
-          </p>
-          <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "#444", marginTop: "4px", marginBottom: 0 }}>
-            Bahasa terpilih untuk ekstraksi kode dari dokumen Anda.
-          </p>
-        </div>
-
         {/* Tip */}
         <div
           style={{
@@ -153,7 +197,9 @@ export function LanguagePanel({ selectedLang, onSelect }: LanguagePanelProps) {
           }}
         >
           <p style={{ fontSize: "0.72rem", fontWeight: 800, color: "#555", lineHeight: 1.5, margin: 0 }}>
-            💡 <strong>Tips:</strong> Pilih bahasa yang sesuai dengan kode dalam dokumen agar hasil ekstraksi lebih akurat!
+            {hasDetected
+              ? `💡 ${detectedLangs.length} bahasa ditemukan. Klik tab untuk preview masing-masing.`
+              : "💡 Bahasa akan terdeteksi otomatis setelah file diekstrak."}
           </p>
         </div>
       </div>

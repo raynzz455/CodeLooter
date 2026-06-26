@@ -3,7 +3,7 @@ export interface Language {
   label: string;
   emoji: string;
   color: string;
-  ext: string; // file extension for download
+  ext: string;
 }
 
 export interface RecentFile {
@@ -19,4 +19,17 @@ export interface Stat {
   label: string;
   val: string;
   color: string;
+}
+
+export interface CodeBlock {
+  lang: string;
+  code: string;
+  lines: number;
+}
+
+export interface ExtractResult {
+  blocks: CodeBlock[];
+  filename: string;
+  size: number;
+  total: number;
 }

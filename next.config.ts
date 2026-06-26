@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
-  // Allow up to 50MB uploads
   experimental: {
     serverActions: {
       bodySizeLimit: "50mb",
     },
   },
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
+  serverExternalPackages: ["unpdf","mammoth"],
 };
 
 export default nextConfig;
