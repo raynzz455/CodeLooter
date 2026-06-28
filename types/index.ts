@@ -22,6 +22,7 @@ export interface Stat {
 }
 
 export interface CodeBlock {
+  index: number;
   lang: string;
   code: string;
   lines: number;

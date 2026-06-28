@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Copy, Check, Download, Archive, AlertCircle } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Copy, Check, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardHeader } from "./ui";
 import { LANGUAGES } from "./data";
 import type { CodeBlock, Language } from "@/types";
@@ -14,74 +14,96 @@ interface ResultPanelProps {
 }
 
 export function ResultPanel({
-  selectedLang,
   isExtracting,
   extractedBlocks,
   extractError,
 }: ResultPanelProps) {
-  const [copied, setCopied] = useState(false);
+  const [activeIndex, setActiveIndex]     = useState<number>(0);
+  const [checked, setChecked]             = useState<Set<number>>(new Set());
+  const [copied, setCopied]               = useState(false);
+  const [filterLang, setFilterLang]       = useState<string>("all");
+  const [showFilter, setShowFilter]       = useState(false);
 
   const extracted = extractedBlocks.length > 0;
 
-  // Find block matching selected lang, fallback to first block
-  const activeBlock =
-    extractedBlocks.find((b) => b.lang === selectedLang) ??
-    extractedBlocks[0] ??
-    null;
+  // Langs present in result
+  const langs = useMemo(() =>
+    [...new Set(extractedBlocks.map((b) => b.lang))],
+    [extractedBlocks]
+  );
 
-  const currentLang =
-    LANGUAGES.find((l) => l.id === (activeBlock?.lang ?? selectedLang)) ??
-    (LANGUAGES[0] as Language);
+  // Filtered list
+  const visible = useMemo(() =>
+    filterLang === "all"
+      ? extractedBlocks
+      : extractedBlocks.filter((b) => b.lang === filterLang),
+    [extractedBlocks, filterLang]
+  );
 
-  const code = activeBlock?.code ?? "";
+  const activeBlock = visible.find((b) => b.index === activeIndex) ?? visible[0] ?? null;
+  const currentLang = (LANGUAGES.find((l) => l.id === activeBlock?.lang) ?? LANGUAGES[0]) as Language;
+
+  // Toggle single checkbox
+  const toggle = (idx: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(idx) ? next.delete(idx) : next.add(idx);
+      return next;
+    });
+  };
+
+  // Select all visible / deselect all
+  const allVisibleChecked = visible.length > 0 && visible.every((b) => checked.has(b.index));
+  const toggleAll = () => {
+    if (allVisibleChecked) {
+      setChecked((prev) => {
+        const next = new Set(prev);
+        visible.forEach((b) => next.delete(b.index));
+        return next;
+      });
+    } else {
+      setChecked((prev) => {
+        const next = new Set(prev);
+        visible.forEach((b) => next.add(b.index));
+        return next;
+      });
+    }
+  };
 
   const handleCopy = async () => {
-    if (!code) return;
-    await navigator.clipboard.writeText(code);
+    if (!activeBlock) return;
+    await navigator.clipboard.writeText(activeBlock.code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadFile = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
+  // Download selected blocks — merge per lang into one file each
   const handleDownload = () => {
-    if (!activeBlock) return;
-    downloadFile(code, `extracted_code.${currentLang.ext}`);
-  };
+    const selected = extractedBlocks.filter((b) => checked.has(b.index));
+    if (selected.length === 0) return;
 
-  const handleDownloadAll = () => {
-    if (extractedBlocks.length === 0) return;
-
-    // Single lang → download directly
-    if (extractedBlocks.length === 1) {
-      const block = extractedBlocks[0];
-      const lang = LANGUAGES.find((l) => l.id === block.lang);
-      downloadFile(block.code, `extracted_${block.lang}.${lang?.ext ?? "txt"}`);
-      return;
+    // Group by lang
+    const byLang = new Map<string, string[]>();
+    for (const b of selected) {
+      const arr = byLang.get(b.lang) ?? [];
+      arr.push(b.code);
+      byLang.set(b.lang, arr);
     }
 
-    // Multi lang → download as a single combined .txt with clear separators
-    // (no external zip library needed — clean and dependency-free)
-    const combined = extractedBlocks
-      .map((block) => {
-        const lang = LANGUAGES.find((l) => l.id === block.lang);
-        const header = `${"=".repeat(60)}\n// FILE: extracted_${block.lang}.${lang?.ext ?? "txt"}\n// LANGUAGE: ${lang?.label ?? block.lang} · ${block.lines} lines\n${"=".repeat(60)}`;
-        return `${header}\n\n${block.code}`;
-      })
-      .join("\n\n\n");
-
-    downloadFile(combined, "codelooter_all_extracted.txt");
+    for (const [lang, codes] of byLang.entries()) {
+      const ext = LANGUAGES.find((l) => l.id === lang)?.ext ?? "txt";
+      const content = codes.join("\n\n# ── next block ──\n\n");
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `codelooter_${lang}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
-  const isMultiLang = extractedBlocks.length > 1;
+  const checkedCount = checked.size;
 
   return (
     <Card>
@@ -89,378 +111,238 @@ export function ResultPanel({
       <CardHeader bg="#f5f0ff">
         <div style={{ display: "flex", gap: "5px" }}>
           {["#ff6b6b", "#ffe8a3", "#d4f0e4"].map((c) => (
-            <div
-              key={c}
-              style={{
-                width: "11px",
-                height: "11px",
-                borderRadius: "50%",
-                backgroundColor: c,
-                border: "2px solid #000",
-              }}
-            />
+            <div key={c} style={{ width: "11px", height: "11px", borderRadius: "50%", backgroundColor: c, border: "2px solid #000" }} />
           ))}
         </div>
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "1.15rem",
-            letterSpacing: "0.05em",
-            flex: 1,
-          }}
-        >
+        <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", letterSpacing: "0.05em", flex: 1 }}>
           HASIL EKSTRAKSI
         </span>
-        <div
-          style={{
-            backgroundColor: extracted ? "#d4f0e4" : extractError ? "#ffd6d6" : "#ffe8a3",
-            border: "2px solid #000",
-            borderRadius: "8px",
-            padding: "2px 9px",
-            fontSize: "0.68rem",
-            fontWeight: 900,
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-            fontFamily: "var(--font-body)",
-          }}
-        >
-          <span
-            style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              backgroundColor: extracted ? "#00aa44" : extractError ? "#ff4444" : "#ffaa00",
-              display: "inline-block",
-            }}
-          />
-          {extracted ? `${extractedBlocks.length} BAHASA` : extractError ? "GAGAL" : "MENUNGGU"}
+        {/* Status badge */}
+        <div style={{
+          backgroundColor: extracted ? "#d4f0e4" : extractError ? "#ffd6d6" : "#ffe8a3",
+          border: "2px solid #000", borderRadius: "8px", padding: "2px 9px",
+          fontSize: "0.68rem", fontWeight: 900, display: "flex", alignItems: "center", gap: "4px",
+          fontFamily: "var(--font-body)",
+        }}>
+          <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: extracted ? "#00aa44" : extractError ? "#ff4444" : "#ffaa00", display: "inline-block" }} />
+          {extracted ? `${extractedBlocks.length} BLOK` : extractError ? "GAGAL" : "MENUNGGU"}
         </div>
       </CardHeader>
 
-      {/* Multi-lang tab bar */}
-      {isMultiLang && (
-        <div
-          style={{
-            borderBottom: "3px solid #000",
-            backgroundColor: "#fef9f0",
-            padding: "8px 12px",
-            display: "flex",
-            gap: "6px",
-            flexWrap: "wrap",
-            flexShrink: 0,
-          }}
-        >
-          {extractedBlocks.map((block) => {
-            const lang = LANGUAGES.find((l) => l.id === block.lang);
-            const isActive = block.lang === (activeBlock?.lang ?? "");
-            return (
+      {extracted && (
+        <>
+          {/* Toolbar: filter + select all + download */}
+          <div style={{
+            borderBottom: "3px solid #000", backgroundColor: "#fef9f0",
+            padding: "8px 12px", display: "flex", alignItems: "center",
+            gap: "8px", flexWrap: "wrap", flexShrink: 0,
+          }}>
+            {/* Select all checkbox */}
+            <label style={{ display: "flex", alignItems: "center", gap: "5px", cursor: "pointer", fontWeight: 900, fontSize: "0.75rem", fontFamily: "var(--font-body)" }}>
+              <input
+                type="checkbox"
+                checked={allVisibleChecked}
+                onChange={toggleAll}
+                style={{ width: "15px", height: "15px", cursor: "pointer" }}
+              />
+              Pilih semua
+            </label>
+
+            <div style={{ width: "1px", height: "20px", backgroundColor: "#000", flexShrink: 0 }} />
+
+            {/* Lang filter */}
+            <div style={{ position: "relative" }}>
               <button
-                key={block.lang}
-                onClick={() => {
-                  // Trigger parent lang selection via a custom event workaround
-                  // Parent listens via selectedLang prop change
-                  const event = new CustomEvent("codelooter:selectlang", {
-                    detail: block.lang,
-                    bubbles: true,
-                  });
-                  document.dispatchEvent(event);
-                }}
+                onClick={() => setShowFilter((v) => !v)}
                 style={{
-                  backgroundColor: isActive ? (lang?.color ?? "#ffe8a3") : "#fff",
-                  border: `2px solid #000`,
-                  borderRadius: "8px",
-                  padding: "3px 10px",
-                  fontSize: "0.72rem",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  boxShadow: isActive ? "2px 2px 0 #000" : "none",
-                  transform: isActive ? "translate(1px,1px)" : "",
+                  backgroundColor: filterLang === "all" ? "#fff" : LANGUAGES.find((l) => l.id === filterLang)?.color ?? "#fff",
+                  border: "2px solid #000", borderRadius: "7px", padding: "3px 10px",
+                  fontSize: "0.72rem", fontWeight: 900, cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: "4px",
                   fontFamily: "var(--font-body)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  transition: "all 0.1s",
                 }}
               >
-                <span>{lang?.emoji ?? "📄"}</span>
-                {lang?.label ?? block.lang}
-                <span
+                {filterLang === "all" ? "Semua bahasa" : LANGUAGES.find((l) => l.id === filterLang)?.label ?? filterLang}
+                {showFilter ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+              {showFilter && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 3px)", left: 0,
+                  backgroundColor: "#fff", border: "2px solid #000", borderRadius: "8px",
+                  boxShadow: "4px 4px 0 #000", zIndex: 20, overflow: "hidden", minWidth: "130px",
+                }}>
+                  {["all", ...langs].map((l, i) => {
+                    const lang = LANGUAGES.find((x) => x.id === l);
+                    return (
+                      <button key={l} onClick={() => { setFilterLang(l); setShowFilter(false); }}
+                        style={{
+                          width: "100%", padding: "7px 12px", textAlign: "left",
+                          backgroundColor: filterLang === l ? (lang?.color ?? "#ffe8a3") : "#fff",
+                          border: "none", borderBottom: i < langs.length ? "1px solid #eee" : "none",
+                          fontSize: "0.75rem", fontWeight: 800, cursor: "pointer",
+                          fontFamily: "var(--font-body)",
+                        }}
+                      >
+                        {l === "all" ? "Semua bahasa" : `${lang?.emoji ?? ""} ${lang?.label ?? l}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Download button */}
+            <button
+              onClick={handleDownload}
+              disabled={checkedCount === 0}
+              style={{
+                marginLeft: "auto",
+                backgroundColor: checkedCount > 0 ? "#000" : "#ccc",
+                color: checkedCount > 0 ? "#ffe8a3" : "#888",
+                border: "2px solid #000", borderRadius: "8px",
+                padding: "4px 12px", fontSize: "0.75rem", fontWeight: 900,
+                cursor: checkedCount > 0 ? "pointer" : "not-allowed",
+                fontFamily: "var(--font-display)", letterSpacing: "0.05em",
+                boxShadow: checkedCount > 0 ? "3px 3px 0 #ff6b6b" : "none",
+                display: "flex", alignItems: "center", gap: "5px",
+                transition: "all 0.1s",
+              }}
+            >
+              <Download size={13} />
+              {checkedCount > 0 ? `DOWNLOAD (${checkedCount})` : "DOWNLOAD"}
+            </button>
+          </div>
+
+          {/* Main content: block list + preview */}
+          <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+
+            {/* Block list */}
+            <div style={{
+              width: "180px", flexShrink: 0, borderRight: "3px solid #000",
+              overflowY: "auto", backgroundColor: "#fef9f0",
+            }}>
+              {visible.map((block, i) => {
+                const lang = LANGUAGES.find((l) => l.id === block.lang);
+                const isActive = activeIndex === block.index;
+                return (
+                  <div
+                    key={block.index}
+                    onClick={() => setActiveIndex(block.index)}
+                    style={{
+                      padding: "8px 10px",
+                      borderBottom: i < visible.length - 1 ? "2px solid #eee" : "none",
+                      backgroundColor: isActive ? (lang?.color ?? "#ffe8a3") : "transparent",
+                      cursor: "pointer", display: "flex", alignItems: "flex-start", gap: "7px",
+                      transition: "background-color 0.1s",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked.has(block.index)}
+                      onChange={(e) => { e.stopPropagation(); toggle(block.index); }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: "2px", flexShrink: 0, cursor: "pointer" }}
+                    />
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: "0.72rem", fontWeight: 900, margin: 0, display: "flex", alignItems: "center", gap: "3px" }}>
+                        <span>{lang?.emoji ?? "📄"}</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {lang?.label ?? block.lang}
+                        </span>
+                      </p>
+                      <p style={{ fontSize: "0.62rem", fontWeight: 700, color: "#666", margin: 0 }}>
+                        Blok #{block.index + 1} · {block.lines} baris
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Code preview */}
+            <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+              <div style={{
+                backgroundColor: "#1a1a2e", height: "100%", overflowY: "auto",
+                padding: "16px", fontFamily: "var(--font-mono)",
+                fontSize: "0.76rem", lineHeight: "1.7",
+              }}>
+                {activeBlock ? (
+                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#e8f4fd" }}>
+                    <code>{activeBlock.code}</code>
+                  </pre>
+                ) : (
+                  <p style={{ color: "#666", fontWeight: 700, margin: 0 }}>Pilih blok untuk preview</p>
+                )}
+              </div>
+
+              {/* Copy button */}
+              {activeBlock && (
+                <button
+                  onClick={handleCopy}
                   style={{
-                    backgroundColor: "#000",
-                    color: "#fff",
-                    borderRadius: "4px",
-                    padding: "0px 4px",
-                    fontSize: "0.6rem",
+                    position: "absolute", bottom: "12px", right: "12px",
+                    backgroundColor: copied ? "#d4f0e4" : "#ff6b6b",
+                    border: "3px solid #000", borderRadius: "999px",
+                    padding: "8px 14px", fontFamily: "var(--font-display)",
+                    fontSize: "0.9rem", letterSpacing: "0.05em",
+                    cursor: "pointer", boxShadow: copied ? "2px 2px 0 #000" : "4px 4px 0 #000",
+                    display: "flex", alignItems: "center", gap: "5px",
+                    transition: "all 0.15s",
                   }}
                 >
-                  {block.lines}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                  {copied ? <Check size={13} strokeWidth={3} /> : <Copy size={13} />}
+                  {copied ? "TERSALIN!" : "SALIN"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{
+            backgroundColor: "#ffe0d0", borderTop: "3px solid #000",
+            padding: "6px 14px", display: "flex", alignItems: "center",
+            justifyContent: "space-between", flexShrink: 0, fontFamily: "var(--font-body)",
+          }}>
+            <span style={{ fontSize: "0.68rem", fontWeight: 900 }}>
+              {currentLang.emoji} {currentLang.label} · Blok #{(activeBlock?.index ?? 0) + 1} · {activeBlock?.lines ?? 0} baris
+            </span>
+            <span style={{ fontSize: "0.68rem", fontWeight: 900, color: "#555" }}>
+              {checkedCount > 0 ? `${checkedCount} blok dipilih` : "Belum ada yang dipilih"}
+            </span>
+          </div>
+        </>
       )}
 
-      {/* Code area */}
-      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-        <div
-          style={{
-            backgroundColor: "#1a1a2e",
-            height: "100%",
-            overflowY: "auto",
-            padding: "18px",
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.78rem",
-            lineHeight: "1.7",
-            minHeight: "240px",
-          }}
-        >
-          {/* Empty state */}
-          {!extracted && !isExtracting && !extractError && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                gap: "12px",
-                opacity: 0.5,
-              }}
-            >
-              <p style={{ fontFamily: "var(--font-display)", fontSize: "3rem", color: "#aaa", margin: 0 }}>
-                ???
-              </p>
-              <p style={{ color: "#888", fontWeight: 700, textAlign: "center", fontSize: "0.85rem", margin: 0 }}>
-                Upload file &amp; klik EKSTRAK KODE! untuk memulai
-              </p>
-            </div>
-          )}
-
-          {/* Error state */}
-          {extractError && !isExtracting && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                gap: "12px",
-              }}
-            >
-              <AlertCircle size={36} color="#ff6b6b" />
-              <p
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "1.3rem",
-                  color: "#ff6b6b",
-                  letterSpacing: "0.04em",
-                  textAlign: "center",
-                  margin: 0,
-                }}
-              >
-                {extractError}
-              </p>
-            </div>
-          )}
-
-          {/* Loading state */}
-          {isExtracting && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                gap: "16px",
-              }}
-            >
-              <p
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "1.8rem",
-                  color: "#ffe8a3",
-                  animation: "pulse 0.8s ease-in-out infinite alternate",
-                  margin: 0,
-                }}
-              >
+      {/* Empty / loading / error states */}
+      {!extracted && (
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: "12px",
+          backgroundColor: "#1a1a2e", padding: "24px",
+        }}>
+          {isExtracting ? (
+            <>
+              <p style={{ fontFamily: "var(--font-display)", fontSize: "1.6rem", color: "#ffe8a3", animation: "pulse 0.8s ease-in-out infinite alternate", margin: 0 }}>
                 MENGANALISIS FILE...
               </p>
               <div style={{ display: "flex", gap: "6px" }}>
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      backgroundColor: "#d4f0e4",
-                      borderRadius: "50%",
-                      animation: `bounce 0.6s ease-in-out ${i * 0.1}s infinite alternate`,
-                    }}
-                  />
+                {[0,1,2,3,4].map((i) => (
+                  <div key={i} style={{ width: "8px", height: "8px", backgroundColor: "#d4f0e4", borderRadius: "50%", animation: `bounce 0.6s ease-in-out ${i * 0.1}s infinite alternate` }} />
                 ))}
               </div>
-            </div>
+            </>
+          ) : extractError ? (
+            <p style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem", color: "#ff6b6b", textAlign: "center", margin: 0 }}>
+              {extractError}
+            </p>
+          ) : (
+            <>
+              <p style={{ fontFamily: "var(--font-display)", fontSize: "3rem", color: "#aaa", margin: 0 }}>???</p>
+              <p style={{ color: "#888", fontWeight: 700, textAlign: "center", fontSize: "0.85rem", margin: 0 }}>
+                Upload file &amp; klik EKSTRAK KODE! untuk memulai
+              </p>
+            </>
           )}
-
-          {/* Result */}
-          {extracted && activeBlock && (
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#e8f4fd" }}>
-              <code>{code}</code>
-            </pre>
-          )}
-        </div>
-
-        {/* Action buttons */}
-        {extracted && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: "14px",
-              right: "14px",
-              display: "flex",
-              gap: "8px",
-              zIndex: 10,
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-            }}
-          >
-            {/* Download all as ZIP (multi-lang only) */}
-            {isMultiLang && (
-              <button
-                onClick={handleDownloadAll}
-                aria-label="Download semua sebagai ZIP"
-                style={{
-                  backgroundColor: "#ffe8a3",
-                  border: "3px solid #000",
-                  borderRadius: "999px",
-                  padding: "10px 14px",
-                  fontFamily: "var(--font-display)",
-                  fontSize: "0.95rem",
-                  letterSpacing: "0.06em",
-                  color: "#000",
-                  cursor: "pointer",
-                  boxShadow: "5px 5px 0 #000",
-                  transition: "all 0.15s",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)";
-                  (e.currentTarget as HTMLElement).style.boxShadow = "3px 3px 0 #000";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.transform = "";
-                  (e.currentTarget as HTMLElement).style.boxShadow = "5px 5px 0 #000";
-                }}
-              >
-                <Archive size={14} strokeWidth={2.5} />
-                DOWNLOAD ALL
-              </button>
-            )}
-
-            {/* Download current */}
-            <button
-              onClick={handleDownload}
-              aria-label={`Download kode sebagai .${currentLang.ext}`}
-              style={{
-                backgroundColor: "#d4f0e4",
-                border: "3px solid #000",
-                borderRadius: "999px",
-                padding: "10px 14px",
-                fontFamily: "var(--font-display)",
-                fontSize: "0.95rem",
-                letterSpacing: "0.06em",
-                color: "#000",
-                cursor: "pointer",
-                boxShadow: "5px 5px 0 #000",
-                transition: "all 0.15s",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)";
-                (e.currentTarget as HTMLElement).style.boxShadow = "3px 3px 0 #000";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.transform = "";
-                (e.currentTarget as HTMLElement).style.boxShadow = "5px 5px 0 #000";
-              }}
-            >
-              <Download size={14} strokeWidth={2.5} />
-              .{currentLang.ext}
-            </button>
-
-            {/* Copy */}
-            <button
-              onClick={handleCopy}
-              aria-label={copied ? "Tersalin!" : "Salin kode"}
-              style={{
-                backgroundColor: copied ? "#d4f0e4" : "#ff6b6b",
-                border: "3px solid #000",
-                borderRadius: "999px",
-                padding: "10px 18px",
-                fontFamily: "var(--font-display)",
-                fontSize: "0.95rem",
-                letterSpacing: "0.06em",
-                color: "#000",
-                cursor: "pointer",
-                boxShadow: copied ? "2px 2px 0 #000" : "5px 5px 0 #000",
-                transform: copied ? "translate(3px,3px)" : "",
-                transition: "all 0.15s",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-              onMouseEnter={(e) => {
-                if (!copied) {
-                  (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)";
-                  (e.currentTarget as HTMLElement).style.boxShadow = "3px 3px 0 #000";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!copied) {
-                  (e.currentTarget as HTMLElement).style.transform = "";
-                  (e.currentTarget as HTMLElement).style.boxShadow = "5px 5px 0 #000";
-                }
-              }}
-            >
-              {copied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} strokeWidth={2.5} />}
-              {copied ? "TERSALIN!" : "SALIN"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      {extracted && activeBlock && (
-        <div
-          style={{
-            backgroundColor: "#ffe0d0",
-            borderTop: "3px solid #000",
-            padding: "7px 16px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
-            fontFamily: "var(--font-body)",
-          }}
-        >
-          <span style={{ fontSize: "0.7rem", fontWeight: 900 }}>
-            {currentLang.emoji} {currentLang.label} · {activeBlock.lines} baris
-          </span>
-          <span style={{ fontSize: "0.7rem", fontWeight: 900, color: "#555" }}>
-            {new Date().toLocaleDateString("id-ID", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
-          </span>
         </div>
       )}
     </Card>

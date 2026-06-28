@@ -10,7 +10,8 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  serverExternalPackages: ["unpdf","mammoth"],
+  // Prevent webpack from bundling these CJS-only packages
+  serverExternalPackages: ["pdf-parse", "mammoth"],
 };
 
 export default nextConfig;
