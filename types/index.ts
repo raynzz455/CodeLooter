@@ -26,8 +26,8 @@ export interface CodeBlock {
   lang: string;
   code: string;
   lines: number;
-  /** Strategi yang menangkap blok ini: "anchor" | "fenced" | "ipynb" | "heuristic" */
-  source?: string;
+  /** Strategi yang menangkap blok ini: "anchor" | "fenced" | "ipynb" | "heuristic" | "font" | "ocr" | "latex" */
+  source: string;
 }
 
 export interface ExtractResult {

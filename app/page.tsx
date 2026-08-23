@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { ChevronDown, LogIn, LogOut, FileText, Lock, ChevronRight, Code2, Upload, X, Zap, Copy, Check } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, LogIn, FileText, Lock, ChevronRight, Code2, Upload, X, Zap, Copy, Check, Save, FolderOpen } from "lucide-react";
 import { SplashScreen, useShouldShowSplash } from "@/components/SplashScreen";
-import { AuthModal } from "@/components/AuthModal";
-import { LANGUAGES, RECENT_FILES, STATS, SAMPLE_CODES } from "@/components/data";
+import { LANGUAGES, STATS, SAMPLE_CODES } from "@/components/data";
+import { extractCode, saveSnippet, getUser, logout, type User } from "@/lib/api";
 import type { CodeBlock } from "@/types";
 
 const ACCEPTED_EXT = /\.(pdf|doc|docx|pptx?|xlsx?|txt|md|html|ipynb|tex)$/i;
@@ -34,11 +35,11 @@ function CardHeader({ bg, children }: { bg: string; children: React.ReactNode })
 }
 
 export default function Home() {
+  const router = useRouter();
   const shouldShowSplash                  = useShouldShowSplash();
   const [splashDone, setSplashDone]       = useState(false);
-  const [showModal, setShowModal]         = useState(false);
   const [profileOpen, setProfileOpen]     = useState(false);
-  const [user, setUser]                   = useState<string | null>(null);
+  const [user, setUser]                   = useState<User | null>(null);
   const [selectedLang, setSelectedLang]   = useState("python");
   const [dropdownOpen, setDropdownOpen]   = useState(false);
   const [uploadedFile, setUploadedFile]   = useState<File | null>(null);
@@ -47,6 +48,8 @@ export default function Home() {
   const [extractedBlocks, setExtractedBlocks] = useState<CodeBlock[]>([]);
   const [extractError, setExtractError]   = useState<string | null>(null);
   const [copied, setCopied]               = useState(false);
+  const [savedSnippetId, setSavedSnippetId] = useState<string | null>(null);
+  const [saving, setSaving]               = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileRef   = useRef<HTMLDivElement>(null);
@@ -57,6 +60,17 @@ export default function Home() {
   // active block for preview
   const activeBlock = extractedBlocks.find((b) => b.lang === selectedLang) ?? extractedBlocks[0] ?? null;
   const displayCode = activeBlock?.code ?? SAMPLE_CODES[selectedLang] ?? "";
+
+  // Init user from cookie on mount
+  useEffect(() => {
+    setUser(getUser());
+  }, []);
+
+  const handleLogout = () => {
+    logout();
+    setUser(null);
+    setProfileOpen(false);
+  };
 
   // close profile on outside click
   useEffect(() => {
@@ -91,24 +105,38 @@ export default function Home() {
     setIsExtracting(true);
     setExtractError(null);
     setExtractedBlocks([]);
+    setSavedSnippetId(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", uploadedFile);
-      const res = await fetch("/api/extract", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) { setExtractError(data.error ?? "Gagal mengekstrak kode"); return; }
+      const data = await extractCode(uploadedFile);
       const blocks: CodeBlock[] = data.blocks ?? [];
       setExtractedBlocks(blocks);
-      // Pilih bahasa default: blok pertama yang bukan "unknown", atau fallback ke blok pertama.
       if (blocks.length > 0) {
         const firstKnown = blocks.find((b) => b.lang !== "unknown");
         setSelectedLang(firstKnown?.lang ?? blocks[0].lang);
       }
-    } catch {
-      setExtractError("Koneksi gagal — coba lagi");
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Koneksi gagal — coba lagi");
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!uploadedFile || extractedBlocks.length === 0) return;
+    if (!user) {
+      // User belum login → arahkan ke /auth
+      router.push("/auth");
+      return;
+    }
+    setSaving(true);
+    try {
+      const snippet = await saveSnippet(uploadedFile.name, extractedBlocks);
+      setSavedSnippetId(snippet.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal menyimpan snippet");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -137,9 +165,6 @@ export default function Home() {
       {/* SPLASH */}
       {shouldShowSplash && !splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
-      {/* AUTH MODAL */}
-      {showModal && <AuthModal onClose={() => setShowModal(false)} onSignIn={(n) => setUser(n)} />}
-
       <div style={{ backgroundColor: "#fef9f0", fontFamily: "var(--font-body)", minHeight: "100vh" }}>
 
         {/* ══ HEADER ══ */}
@@ -158,18 +183,24 @@ export default function Home() {
           </div>
 
           {/* profile */}
-          <div ref={profileRef} style={{ position: "relative", flexShrink: 0 }}>
+          <div ref={profileRef} style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+            {user && (
+              <button onClick={() => router.push("/dashboard")}
+                style={{ backgroundColor: "#d4f0e4", border: "2px solid #000", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 900, fontSize: "0.82rem", boxShadow: "2px 2px 0 #000", display: "flex", alignItems: "center", gap: "6px" }}>
+                <FolderOpen size={14} /> <span className="profile-name">Snippet Saya</span>
+              </button>
+            )}
             {user ? (
               <button onClick={() => setProfileOpen(!profileOpen)} style={{ backgroundColor: "#f5f0ff", border: "3px solid #000", borderRadius: "10px", padding: "5px 12px", boxShadow: "3px 3px 0 #000", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
                 <div style={{ backgroundColor: "#ff6b6b", border: "2px solid #000", borderRadius: "50%", width: 30, height: 30, overflow: "hidden", flexShrink: 0 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/logo.jpg" alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
-                <span className="profile-name" style={{ fontWeight: 900, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{user}</span>
+                <span className="profile-name" style={{ fontWeight: 900, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{user.name || user.email}</span>
                 <ChevronDown size={14} style={{ transform: profileOpen ? "rotate(180deg)" : "", transition: "transform 0.2s" }} />
               </button>
             ) : (
-              <button onClick={() => setShowModal(true)} style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "8px 16px", fontFamily: "var(--font-display)", fontSize: "1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "flex", alignItems: "center", gap: "6px", transition: "transform 0.1s, box-shadow 0.1s" }}
+              <button onClick={() => router.push("/auth")} style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "8px 16px", fontFamily: "var(--font-display)", fontSize: "1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "flex", alignItems: "center", gap: "6px", transition: "transform 0.1s, box-shadow 0.1s" }}
                 onMouseDown={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #ff6b6b"; }}
                 onMouseUp={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "4px 4px 0 #ff6b6b"; }}
               >
@@ -186,17 +217,23 @@ export default function Home() {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src="/logo.jpg" alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     </div>
-                    <div>
-                      <p style={{ fontWeight: 900, fontSize: "0.85rem", lineHeight: 1.2, margin: 0, fontFamily: "var(--font-body)" }}>{user}</p>
-                      <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "#666", margin: 0 }}>Member</p>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontWeight: 900, fontSize: "0.85rem", lineHeight: 1.2, margin: 0, fontFamily: "var(--font-body)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name || user.email}</p>
+                      <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "#666", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</p>
                     </div>
                   </div>
                 </div>
-                <button onClick={() => { setUser(null); setProfileOpen(false); }} style={{ width: "100%", padding: "11px 14px", backgroundColor: "#fff", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.88rem", color: "#cc2222", transition: "background-color 0.1s" }}
+                <button onClick={() => router.push("/dashboard")} style={{ width: "100%", padding: "11px 14px", backgroundColor: "#fff", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.88rem", transition: "background-color 0.1s" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fef9f0"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff"; }}
+                >
+                  <FolderOpen size={15} /> Dashboard Saya
+                </button>
+                <button onClick={handleLogout} style={{ width: "100%", padding: "11px 14px", backgroundColor: "#fff", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.88rem", color: "#cc2222", transition: "background-color 0.1s" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff0f0"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff"; }}
                 >
-                  <LogOut size={15} /> Keluar
+                  <LogIn size={15} style={{ transform: "rotate(180deg)" }} /> Keluar
                 </button>
               </div>
             )}
@@ -394,7 +431,20 @@ export default function Home() {
 
                 {/* action buttons */}
                 {extracted && (
-                  <div style={{ position: "absolute", bottom: 14, right: 14, display: "flex", gap: "8px", zIndex: 10 }}>
+                  <div style={{ position: "absolute", bottom: 14, right: 14, display: "flex", gap: "8px", zIndex: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {/* Save snippet — hanya user login */}
+                    {savedSnippetId ? (
+                      <button onClick={() => router.push(`/snippets/${savedSnippetId}`)}
+                        style={{ backgroundColor: "#d4f0e4", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px" }}>
+                        <Check size={14} strokeWidth={3} /> Tersimpan! Lihat
+                      </button>
+                    ) : (
+                      <button onClick={handleSave} disabled={saving}
+                        title={user ? "Simpan ke akun saya" : "Login dulu untuk simpan"}
+                        style={{ backgroundColor: user ? "#f5f0ff" : "#eee", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: saving ? "not-allowed" : "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px", opacity: saving ? 0.6 : 1 }}>
+                        {saving ? "⏳..." : (<><Save size={14} /> {user ? "Simpan" : "🔒 Login utk Simpan"}</>)}
+                      </button>
+                    )}
                     <button onClick={handleDownload} style={{ backgroundColor: "#d4f0e4", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px", transition: "all 0.15s" }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #000"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "4px 4px 0 #000"; }}
@@ -425,106 +475,39 @@ export default function Home() {
           {/* FILE TERBARU */}
           <div style={{ marginTop: "16px", backgroundColor: "#fff", border: "3px solid #000", borderRadius: "16px", boxShadow: "5px 5px 0 #000", overflow: "hidden" }}>
             <div style={{ backgroundColor: "#ffe0d0", borderBottom: "3px solid #000", padding: "11px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", letterSpacing: "0.05em" }}>📂 FILE TERBARU</span>
-              <Tag bg="#000" color="#ffe0d0">5 TERAKHIR</Tag>
-              {!user && (
-                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Lock size={13} />
-                  <span style={{ fontSize: "0.72rem", fontWeight: 900, color: "#888", fontFamily: "var(--font-body)" }}>Khusus member</span>
-                </div>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", letterSpacing: "0.05em" }}>📂 SNIPPET TERSIMPAN</span>
+              <Tag bg="#000" color="#ffe0d0">DB SUPABASE</Tag>
+            </div>
+            <div style={{ padding: "28px 20px", textAlign: "center", backgroundColor: "#fef9f0" }}>
+              {user ? (
+                <>
+                  <p style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", letterSpacing: "0.04em", margin: "0 0 6px 0" }}>
+                    Halo, {user.name || user.email.split("@")[0]}! 👋
+                  </p>
+                  <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "#555", margin: "0 0 18px 0", fontFamily: "var(--font-body)" }}>
+                    Klik tombol di bawah untuk lihat semua snippet yang sudah kamu simpan
+                  </p>
+                  <button onClick={() => router.push("/dashboard")}
+                    style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "12px 24px", fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                    <FolderOpen size={16} /> Buka Dashboard
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", letterSpacing: "0.04em", margin: "0 0 6px 0" }}>
+                    🔒 Fitur Simpan Snippet
+                  </p>
+                  <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "#555", margin: "0 0 18px 0", fontFamily: "var(--font-body)" }}>
+                    Login untuk simpan hasil ekstraksi ke akunmu. File asli TIDAK disimpan — hanya nama file + text kode.
+                    Bisa di-download ulang kapan saja sebagai file .py / .js / .sql sesuai bahasa.
+                  </p>
+                  <button onClick={() => router.push("/auth")}
+                    style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "12px 24px", fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                    <LogIn size={16} /> MASUK / DAFTAR <ChevronRight size={14} />
+                  </button>
+                </>
               )}
             </div>
-
-            {!user ? (
-              <div style={{ padding: "36px 20px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "14px", backgroundColor: "#fef9f0" }}>
-                <div style={{ opacity: 0.18, pointerEvents: "none", width: "100%", overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
-                    <tbody>
-                      {RECENT_FILES.slice(0,3).map((row, i) => (
-                        <tr key={i} style={{ borderBottom: "2px solid #eee" }}>
-                          <td style={{ padding: "8px 14px", fontWeight: 800, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{row.nama}</td>
-                          <td style={{ padding: "8px 14px" }}><Tag>{row.jenis}</Tag></td>
-                          <td style={{ padding: "8px 14px", fontWeight: 800, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{row.bahasa}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ position: "relative", marginTop: "-100px", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                  <div style={{ backgroundColor: "#fff", border: "3px solid #000", borderRadius: "12px", padding: "14px 20px", boxShadow: "5px 5px 0 #000", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
-                    <Lock size={28} />
-                    <p style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", letterSpacing: "0.04em", margin: 0 }}>Fitur Khusus Member!</p>
-                    <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "#555", textAlign: "center", margin: 0, fontFamily: "var(--font-body)" }}>Masuk atau daftar untuk melihat riwayat file kamu.</p>
-                    <button onClick={() => setShowModal(true)} style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "10px 24px", fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "flex", alignItems: "center", gap: "6px", transition: "transform 0.1s, box-shadow 0.1s" }}
-                      onMouseDown={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #ff6b6b"; }}
-                      onMouseUp={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "4px 4px 0 #ff6b6b"; }}
-                    >
-                      <LogIn size={16} /> MASUK / DAFTAR <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="recent-table" style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
-                    <thead>
-                      <tr style={{ backgroundColor: "#fef9f0" }}>
-                        {["Nama File","Jenis","Bahasa","Status","Tanggal","Aksi"].map((h) => (
-                          <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontWeight: 900, fontSize: "0.72rem", borderBottom: "2px solid #000", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "var(--font-body)" }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {RECENT_FILES.map((row, i) => (
-                        <tr key={i} style={{ borderBottom: i < RECENT_FILES.length-1 ? "2px solid #eee" : "none", transition: "background-color 0.1s" }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fef9f0"; }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
-                        >
-                          <td style={{ padding: "9px 14px", fontWeight: 800, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>
-                            <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                              <FileText size={13} style={{ flexShrink: 0 }} />
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180, display: "inline-block" }}>{row.nama}</span>
-                            </span>
-                          </td>
-                          <td style={{ padding: "9px 14px" }}><Tag>{row.jenis}</Tag></td>
-                          <td style={{ padding: "9px 14px", fontWeight: 800, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{row.bahasa}</td>
-                          <td style={{ padding: "9px 14px" }}><Tag bg={row.ok ? "#d4f0e4" : "#ffd6d6"}>{row.ok ? "✅ " : "❌ "}{row.status}</Tag></td>
-                          <td style={{ padding: "9px 14px", fontWeight: 700, fontSize: "0.8rem", color: "#555", whiteSpace: "nowrap", fontFamily: "var(--font-body)" }}>{row.tgl}</td>
-                          <td style={{ padding: "9px 14px" }}>
-                            <button style={{ backgroundColor: "#f5f0ff", border: "2px solid #000", borderRadius: "8px", padding: "4px 12px", fontSize: "0.72rem", fontWeight: 900, cursor: "pointer", fontFamily: "var(--font-body)", boxShadow: "2px 2px 0 #000", transition: "all 0.1s" }}
-                              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(1px,1px)"; (e.currentTarget as HTMLElement).style.boxShadow = "1px 1px 0 #000"; }}
-                              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #000"; }}
-                            >Lihat</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="recent-cards">
-                  {RECENT_FILES.map((row, i) => (
-                    <div key={i} style={{ border: "2px solid #000", borderRadius: "10px", overflow: "hidden", boxShadow: "3px 3px 0 #000" }}>
-                      <div style={{ backgroundColor: row.ok ? "#d4f0e4" : "#ffd6d6", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #000" }}>
-                        <span style={{ fontWeight: 900, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "6px", fontFamily: "var(--font-body)" }}>
-                          <FileText size={13} />
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180, display: "inline-block" }}>{row.nama}</span>
-                        </span>
-                        <Tag bg={row.ok ? "#d4f0e4" : "#ffd6d6"}>{row.ok ? "✅" : "❌"} {row.status}</Tag>
-                      </div>
-                      <div style={{ padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "#fef9f0", flexWrap: "wrap", gap: "6px" }}>
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                          <Tag>{row.jenis}</Tag>
-                          <span style={{ fontWeight: 800, fontSize: "0.78rem", fontFamily: "var(--font-body)" }}>{row.bahasa}</span>
-                          <span style={{ fontSize: "0.72rem", color: "#666", fontWeight: 700, fontFamily: "var(--font-body)" }}>{row.tgl}</span>
-                        </div>
-                        <button style={{ backgroundColor: "#f5f0ff", border: "2px solid #000", borderRadius: "7px", padding: "4px 10px", fontSize: "0.72rem", fontWeight: 900, cursor: "pointer", fontFamily: "var(--font-body)" }}>Lihat</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
 
         </main>

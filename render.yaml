@@ -1,0 +1,38 @@
+# Render config untuk backend CodeLooter API
+# Docs: https://render.com/docs/blueprint-spec
+# Deploy: connect GitHub repo → Render akan auto-detect render.yaml
+
+services:
+  - type: web
+    name: codelooter-api
+    runtime: python
+    region: singapore  # atau oregon / frankfurt tergantung user base
+    plan: free  # 512MB RAM, sleep after 15 min idle. Untuk production: starter ($7/mo)
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: CL_SUPABASE_URL
+        sync: false  # set manual di Render dashboard
+      - key: CL_SUPABASE_ANON_KEY
+        sync: false
+      - key: CL_SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CL_JWT_SECRET
+        sync: false
+      - key: CL_CORS_ORIGINS
+        value: '["https://codelooter.vercel.app"]'
+      - key: CL_MAX_UPLOAD_MB
+        value: '50'
+      - key: PYTHON_VERSION
+        value: '3.12.0'
+      # System dependencies untuk pdfplumber + Tesseract OCR
+      - key: RENDER_BUILD_HOOK
+        sync: false
+
+# Catatan: Render Python runtime TIDAK punya Tesseract & pdftotext pre-installed.
+# Untuk OCR fallback, perlu pakai Docker (lihat Dockerfile alternatif).
+# Untuk V1 tanpa OCR, Render free tier cukup.
