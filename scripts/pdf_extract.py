@@ -1,38 +1,21 @@
 #!/usr/bin/env python3
 """
-CodeLooter PDF Extractor — Font-based Code Block Detection
-============================================================
+CodeLooter PDF Extractor — Font-based Code Block Detection + OCR fallback
+======================================================================
 
-Strategi baru: gunakan informasi font dari PDF (via pdfplumber) untuk
-mendeteksi "code block" berdasarkan region monospace vs region prose.
-
-Pendekatan ini JAUH lebih presisi daripada heuristic token-density
-karena PDF secara visual sudah membedakan kode (Courier/Consolas/dll)
-dengan narasi (Times/Calibri/Arial).
-
-Pipeline:
-1. pdfplumber ekstrak semua char dengan font info
-2. Identifikasi font monospace yang dipakai di dokumen ini
-3. Group char monospace menjadi "code spans" per baris
-4. Merge code spans adjacent menjadi code blocks
-5. Apply post-processing: repair line wraps, strip R output (##)
-6. Deteksi bahasa via heuristic (highlight.js di sisi TS)
-
-Output JSON ke stdout:
-{
-  "blocks": [
-    { "code": "...", "page": 1, "y0": 100.0, "y1": 200.0, "lines": 10 },
-    ...
-  ],
-  "fonts_detected": { "monospace": [...], "prose": [...] },
-  "stats": { "total_chars": N, "code_chars": M, "prose_chars": K }
-}
+Strategi:
+1. Font analysis via pdfplumber — deteksi region monospace sebagai code block
+2. ASCII art / box drawing filter — buang tabel, separator, diagram
+3. Single-line block support — untuk statement penting (CREATE DATABASE, import, def class)
+4. OCR fallback — pakai Tesseract untuk PDF berbasis gambar (image-based PDF)
 """
 import sys
 import json
 import argparse
 import re
 import os
+import subprocess
+import tempfile
 from typing import List, Dict, Any, Tuple, Set
 from collections import defaultdict, Counter
 
@@ -41,6 +24,13 @@ try:
 except ImportError:
     print(json.dumps({"error": "pdfplumber not installed. Run: pip install pdfplumber"}))
     sys.exit(1)
+
+try:
+    import pytesseract
+    from PIL import Image
+    HAS_OCR = True
+except ImportError:
+    HAS_OCR = False
 
 
 # ─── Font classification ───
@@ -54,7 +44,6 @@ MONOSPACE_PATTERNS = [
     "ocr b", "ocr-a", "ocr-b", "andy", "saxmono", "go mono",
 ]
 
-# Math font indicators (CambriaMath, STIX, etc.) — NOT code, even if monospace-looking
 MATH_FONT_PATTERNS = [
     "cambria math", "stix", "latin modern math", "tex gyre termes math",
     "asana math", "xits math", "lucida bright math", "mathjax",
@@ -62,16 +51,13 @@ MATH_FONT_PATTERNS = [
 
 
 def normalize_fontname(fontname: str) -> str:
-    """Strip subset prefix (e.g., 'BCEBEE+Consolas' → 'Consolas')."""
     if "+" in fontname:
         return fontname.split("+", 1)[1]
     return fontname
 
 
 def is_monospace_font(fontname: str) -> bool:
-    """Deteksi apakah font adalah monospace berdasarkan nama."""
     fn = normalize_fontname(fontname).lower()
-    # Reject math fonts first
     if any(p in fn for p in MATH_FONT_PATTERNS):
         return False
     return any(p in fn for p in MONOSPACE_PATTERNS)
@@ -79,7 +65,6 @@ def is_monospace_font(fontname: str) -> bool:
 
 # ─── Char grouping ───
 def group_chars_by_line(chars: List[Dict]) -> List[List[Dict]]:
-    """Group chars by line (top coordinate, with tolerance)."""
     if not chars:
         return []
     sorted_chars = sorted(chars, key=lambda c: (round(c["top"], 1), c["x0"]))
@@ -101,7 +86,6 @@ def group_chars_by_line(chars: List[Dict]) -> List[List[Dict]]:
 
 
 def line_to_text(line: List[Dict]) -> str:
-    """Convert a line of chars to text, inserting spaces based on x-gaps."""
     if not line:
         return ""
     parts = []
@@ -109,10 +93,7 @@ def line_to_text(line: List[Dict]) -> str:
     for c in line:
         if prev_x1 is not None:
             gap = c["x0"] - prev_x1
-            # If gap > 1.5pt, insert space(s)
-            # Use the average char width in this line as the unit
             if gap > 1.5:
-                # Estimate char width from line
                 char_widths = [c2["x1"] - c2["x0"] for c2 in line if c2["x1"] > c2["x0"]]
                 avg_w = sum(char_widths) / len(char_widths) if char_widths else 6.0
                 n_spaces = max(1, round(gap / avg_w))
@@ -123,15 +104,39 @@ def line_to_text(line: List[Dict]) -> str:
 
 
 def get_line_indent(line: List[Dict]) -> float:
-    """Get left-most x position (indent level)."""
     if not line:
         return 0
     return min(c["x0"] for c in line)
 
 
+# ─── ASCII art / box drawing detection ───
+ASCII_ART_PATTERNS = [
+    re.compile(r"^[\s|+\-─┼┬┴┌┐└┘├┤]{5,}$"),
+    re.compile(r"^\s*\|[^\n]*\|[^\n]*\|[^\n]*\|[^\n]*$"),
+    re.compile(r"^[\s\-=]{8,}$"),
+    re.compile(r"^[\s│┃║]{3,}[^\n]*[\s│┃║]{3,}$"),
+    re.compile(r"^\s*\d+\s*\|\s*\w+\s*\|\s*\w+\s*\|"),
+]
+
+
+def is_ascii_art(line: str) -> bool:
+    t = line.strip()
+    if not t:
+        return False
+    for p in ASCII_ART_PATTERNS:
+        if p.match(t):
+            return True
+    pipe_count = t.count("|")
+    if pipe_count >= 3 and len(t) > 10:
+        if not re.search(r"\b(SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|JOIN)\b", t, re.IGNORECASE):
+            if pipe_count / len(t) > 0.05:
+                if re.match(r"^[\s\w\d.,+-]*\|[\s\w\d.,+-]+\|", t):
+                    return True
+    return False
+
+
 # ─── Block detection ───
 def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
-    """Detect code blocks in PDF via font analysis."""
     blocks = []
     font_stats = Counter()
     code_chars_count = 0
@@ -164,6 +169,8 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
                 text = line_to_text(line).rstrip()
                 if not text.strip():
                     continue
+                if is_ascii_art(text):
+                    continue
                 top = min(c["top"] for c in line)
                 indent = get_line_indent(line)
                 candidate_lines.append({
@@ -176,12 +183,7 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             if not candidate_lines:
                 continue
 
-            # Group adjacent candidate lines into blocks
-            # Strategy: lines belong to the same block if:
-            # - Same page AND vertical gap <= MAX_BLOCK_GAP (allows 1-2 blank lines)
-            # - OR same page AND both have similar indent (±5pt)
-            MAX_BLOCK_GAP = 35.0  # ~2.5x typical line height — allows blank lines
-
+            MAX_BLOCK_GAP = 35.0
             current_block: List[Dict] = []
             for line in candidate_lines:
                 if not current_block:
@@ -198,15 +200,38 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
                 else:
                     blocks.append(current_block)
                     current_block = [line]
-
             if current_block:
                 blocks.append(current_block)
 
-    # Convert blocks to output format
+    # Convert blocks to output format with single-line block support
+    STRONG_KEYWORDS = re.compile(
+        r"^\s*("
+        r"#include|#define|#ifndef|#ifdef|"
+        r"import\s+\w|from\s+\w+\s+import|"
+        r"library\s*\(|require\s*\(|"
+        r"package\s+\w|"
+        r"public\s+class|private\s+class|protected\s+class|class\s+\w+|"
+        r"def\s+\w+|function\s+\w+|func\s+\w+|fn\s+\w+|"
+        r"interface\s+\w+|enum\s+\w+|struct\s+\w+|"
+        r"namespace\s+\w+|module\s+\w+|"
+        r"<\?php|"
+        r"CREATE\s+(DATABASE|TABLE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER)|"
+        r"DROP\s+(DATABASE|TABLE|INDEX|VIEW)|"
+        r"ALTER\s+TABLE|"
+        r"USE\s+\w+|"
+        r"SELECT\s+\*\s+FROM|SELECT\s+\w+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM"
+        r")",
+        re.IGNORECASE,
+    )
+
     output_blocks = []
     for block in blocks:
         if len(block) < 2:
-            continue
+            single_text = block[0]["text"]
+            if not STRONG_KEYWORDS.match(single_text):
+                continue
+            if len(single_text.strip()) < 15:
+                continue
         text = "\n".join(line["text"] for line in block)
         text = postprocess_block(text)
         if len(text) < 10:
@@ -216,21 +241,12 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             "page": block[0]["page"] + 1,
             "lines": len(block),
             "source": "font",
-            # Keep metadata for merging
             "_page0": block[0]["page"],
             "_top_start": block[0]["top"],
             "_top_end": block[-1]["top"],
         })
 
-    # ─── Post-merge: combine adjacent blocks on same page with small gap ───
-    # Setelah post-processing, kadang blok terpisah padahal sebenarnya satu kesatuan
-    # (mis. komentar di tengah blok yang font-nya berbeda singgah).
-    # Merge blok A dan B jika:
-    # - Sama-sama di halaman yang sama DAN gap <= MAX_MERGE_GAP
-    # - ATAU beda halaman tapi consecutive (B.page = A.page + 1) DAN
-    #   A ada di akhir halaman (top > 0.85 * page_height) DAN
-    #   B ada di awal halaman (top < 0.15 * page_height)
-    # - Total baris gabungan <= 100 (jangan merge blok super besar)
+    # Post-merge: combine adjacent blocks
     merged = []
     MAX_MERGE_GAP = 50.0
     MAX_MERGED_LINES = 100
@@ -250,21 +266,17 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             prev["code"] = prev["code"] + "\n" + b["code"]
             prev["lines"] = prev["lines"] + b["lines"]
             prev["_top_end"] = b["_top_end"]
-            prev["_page0"] = b["_page0"]  # update for next potential merge
-            prev["page"] = b["page"]      # show last page where block ends
+            prev["_page0"] = b["_page0"]
+            prev["page"] = b["page"]
         else:
             merged.append(b)
 
-    # Strip metadata keys from output
     for b in merged:
         for k in ("_page0", "_top_start", "_top_end"):
             b.pop(k, None)
 
-    # ─── Post-split: split blocks that contain multiple "# Kasus N" markers ───
-    # Kadang satu blok besar berisi beberapa kasus terpisah (mis. Kasus 3+4+5).
-    # Kita split pada marker "# Kasus N" atau "#Kasus N" (dengan/tanpa spasi) di awal baris.
+    # Post-split: split blocks containing multiple "# Kasus N" markers
     final_blocks = []
-    # Pattern: # di awal baris (opsional whitespace), lalu "Kasus" (case-insensitive), lalu whitespace, lalu digit
     KASUS_PATTERN = re.compile(r"^[ \t]*#[ \t]*[Kk]asus[ \t]+\d+\b", re.MULTILINE)
     for b in merged:
         code = b["code"]
@@ -285,22 +297,43 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             final_blocks.append(b)
     merged = final_blocks
 
-    # ─── Final filter: drop blocks that are pure fragments ───
-    # (single line "hingga 1.771651" atau artifact PDF lain)
+    # Final filter: drop blocks that are pure fragments
     cleaned = []
     for b in merged:
         code = b["code"].strip()
-        # Skip blocks that are just one short fragment line
         if "\n" not in code and len(code) < 30:
             continue
-        # Skip blocks where ALL lines look like fragments (no real code)
         real_code_lines = 0
         for line in code.split("\n"):
             t = line.strip()
             if not t:
                 continue
-            # Real code line: has assignment, fn call, keyword, or comment
-            if re.search(r"<-|->|=\s*\w|\.\w+\s*\(|^\s*#\s*\w+|^def |^class |^function |^import |^library |^require ", t):
+            is_real = (
+                re.search(r"<-|->", t)
+                or re.search(r"(?<!.)\w+\s*=\s*\S", t)
+                or re.search(r":=", t)
+                or re.search(r"\.\w+\s*\(", t)
+                or re.search(r"\b\w+\s*\(", t)
+                or re.match(r"^\s*(def|class|function|func|fn|import|library|require|module|export|"
+                            r"package|public|private|protected|static|void|int|float|double|long|"
+                            r"string|var|let|const|return|if|else|elif|for|while|switch|case|break|"
+                            r"continue|try|catch|finally|throw|raise|namespace|using|include|"
+                            r"struct|enum|interface|extends|implements|new|async|await|yield|lambda)\b", t)
+                or re.match(r"^\s*(#|//|--|/\*)", t)
+                or re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|"
+                             r"GROUP\s+BY|ORDER\s+BY|HAVING|UNION|VALUES|SET|TABLE|DATABASE|"
+                             r"INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER)\b", t, re.IGNORECASE)
+                or re.match(r"^\s*(\$|mysql>|>>>|>>>>|PS\s+>|\[[\w@.-]+\][:#]?)", t)
+                or re.match(r"^\s*>\s*\w", t)
+                or re.search(r"</?\w+[\s>]", t)
+                or re.search(r"<\?php", t)
+                or re.search(r"<\?=", t)
+                or re.search(r"\$\w+", t)
+                or re.match(r"^\s*#(include|define|ifndef|ifdef|endif|else|pragma)", t)
+                or re.search(r"\w+\s*=\s*[\[{\(]", t)
+                or re.match(r"^\s*\w+\.\w+\s*=", t)
+            )
+            if is_real:
                 real_code_lines += 1
         if real_code_lines == 0:
             continue
@@ -313,6 +346,15 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
         "math": sorted({normalize_fontname(f) for f in font_stats if any(p in normalize_fontname(f).lower() for p in MATH_FONT_PATTERNS)}),
     }
 
+    # OCR FALLBACK
+    ocr_used = False
+    if len(merged) == 0 and HAS_OCR:
+        print("[pdf_extract] No font-based blocks found. Trying OCR fallback...", file=sys.stderr)
+        ocr_blocks = ocr_extract_blocks(pdf_path)
+        if ocr_blocks:
+            merged = ocr_blocks
+            ocr_used = True
+
     return {
         "blocks": merged,
         "fonts_detected": fonts_detected,
@@ -320,8 +362,129 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             "total_chars": total_chars,
             "code_chars": code_chars_count,
             "code_ratio": code_chars_count / total_chars if total_chars > 0 else 0,
+            "ocr_used": ocr_used,
         },
     }
+
+
+# ─── OCR Fallback via Tesseract ───
+def ocr_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
+    blocks = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            subprocess.run(
+                ["pdftoppm", "-png", "-r", "200", "-l", "20", pdf_path, f"{tmpdir}/page"],
+                check=True, capture_output=True, timeout=120,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return []
+
+        for img_file in sorted(os.listdir(tmpdir)):
+            if not img_file.endswith(".png"):
+                continue
+            img_path = os.path.join(tmpdir, img_file)
+            page_num = int(re.search(r"page-(\d+)", img_file).group(1)) if re.search(r"page-(\d+)", img_file) else 1
+
+            try:
+                result = subprocess.run(
+                    ["tesseract", img_path, "-", "--psm", "6", "tsv"],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if result.returncode != 0:
+                    continue
+                lines = result.stdout.split("\n")
+                if len(lines) < 2:
+                    continue
+                line_data = defaultdict(list)
+                for line in lines[1:]:
+                    parts = line.split("\t")
+                    if len(parts) < 12:
+                        continue
+                    try:
+                        block_num = int(parts[2])
+                        par_num = int(parts[3])
+                        line_num = int(parts[4])
+                        top = int(parts[7])
+                        text = parts[11]
+                        if text.strip():
+                            key = (block_num, par_num, line_num)
+                            line_data[key].append((top, text))
+                    except (ValueError, IndexError):
+                        continue
+
+                page_lines = []
+                for key in sorted(line_data.keys()):
+                    parts_list = sorted(line_data[key])
+                    text = " ".join(t for _, t in parts_list).strip()
+                    if text:
+                        top = parts_list[0][0]
+                        page_lines.append({"page": page_num - 1, "top": top, "text": text})
+
+                candidate_lines = []
+                for line in page_lines:
+                    text = line["text"]
+                    if not text.strip():
+                        continue
+                    if is_ascii_art(text):
+                        continue
+                    if looks_like_code_line(text):
+                        candidate_lines.append(line)
+
+                if candidate_lines:
+                    current_block = [candidate_lines[0]]
+                    for line in candidate_lines[1:]:
+                        gap = line["top"] - current_block[-1]["top"]
+                        if gap <= 35:
+                            current_block.append(line)
+                        else:
+                            blocks.append(current_block)
+                            current_block = [line]
+                    blocks.append(current_block)
+
+            except subprocess.TimeoutExpired:
+                continue
+            except Exception:
+                continue
+
+    output = []
+    for block in blocks:
+        if len(block) < 2:
+            continue
+        text = "\n".join(l["text"] for l in block)
+        text = postprocess_block(text)
+        if len(text) < 15:
+            continue
+        output.append({
+            "code": text,
+            "page": block[0]["page"] + 1,
+            "lines": len(block),
+            "source": "ocr",
+        })
+    return output
+
+
+def looks_like_code_line(text: str) -> bool:
+    t = text.strip()
+    if not t:
+        return False
+    return bool(
+        re.search(r"\w+\s*=\s*\S", t)
+        or "<-" in t or "->" in t or ":=" in t or "+=" in t or "-=" in t
+        or re.search(r"\.\w+\s*\(", t)
+        or re.match(r"^\s*(def|class|function|func|fn|import|library|require|module|export|"
+                    r"package|public|private|protected|static|void|int|float|double|long|"
+                    r"string|var|let|const|return|if|else|elif|for|while|switch|case|break|"
+                    r"continue|try|catch|finally|throw|raise|namespace|using|include|"
+                    r"struct|enum|interface|extends|implements|new|async|await|yield|lambda)\b", t)
+        or re.match(r"^\s*(#|//|--|/\*)", t)
+        or re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|"
+                     r"GROUP\s+BY|ORDER\s+BY|HAVING|UNION|VALUES|SET|TABLE|DATABASE)\b", t, re.IGNORECASE)
+        or re.search(r"</?\w+[\s>]", t)
+        or re.search(r"<\?php", t) or re.search(r"<\?=", t) or re.search(r"\$\w+", t)
+        or re.match(r"^\s*#(include|define|ifndef|ifdef)", t)
+        or re.search(r"\w+\([^)]*\)", t)
+        or t.endswith("{") or t.endswith("}") or t.endswith(";")
+    )
 
 
 # ─── Post-processing ───
@@ -365,7 +528,7 @@ def _should_join(cur: str, nxt: str) -> bool:
         return False
     if re.search(r"[)\]}]$", cur_t):
         return False
-    if re.search(r'[\[\]"\'`]$', cur_t):
+    if re.search(r"[\[\"'`]$", cur_t):
         return False
     code_kw = re.compile(
         r"^\s*(import|from|def|class|function|func|fn|return|if|else|elif|"
@@ -380,7 +543,7 @@ def _should_join(cur: str, nxt: str) -> bool:
         return False
     if re.match(r"^[A-Z][a-z]+\s+[a-z]", nxt_t) and not re.match(r"^\w+\s*\(", nxt_t):
         return False
-    if re.search(r"[,+*/<>=&|({[]$", cur_t):
+    if re.search(r"[,+*/<>=&|({\[]$", cur_t):
         return True
     if cur_t.endswith("-") and re.match(r"^[A-Z]", nxt_t):
         return True
@@ -419,16 +582,6 @@ def normalize_whitespace(text: str) -> str:
         t = line.strip()
         if t and re.match(r"^\d+$", t):
             continue
-        # Filter PDF extraction artifacts: fragment lines that are clearly
-        # NOT code. These appear when PDF splits a word mid-character due to
-        # font color/size variation. Examples:
-        #   "gga 0.005333174"     — tail of "hingga 0.005333174"
-        #   "hingga 1.771651"     — tail of "hingga 1.771651" from previous line
-        # Heuristic: line is a fragment if it has ALL these properties:
-        # 1. Consists only of [a-z]+ + space + number (no operators, no parens, no quotes)
-        # 2. Does NOT start with a code keyword
-        # 3. Previous line ends with non-terminator char (so this could be continuation)
-        # OR: line starts with lowercase partial word (1-4 chars) followed by space + number
         is_simple_word_then_number = bool(re.match(r"^[a-z]+\s+\d+(\.\d+)?\s*$", t))
         is_short_fragment_then_number = bool(re.match(r"^[a-z]{1,4}\s+\d", t))
         is_code_keyword = bool(re.match(
@@ -441,22 +594,12 @@ def normalize_whitespace(text: str) -> str:
             t
         ))
         if (is_simple_word_then_number or is_short_fragment_then_number) and not is_code_keyword:
-            # Filter fragment lines: trailing artifact from PDF word-split.
-            # A line like "hingga 1.771651" appearing AFTER a line that ends with
-            # `upper_bound)` is clearly the tail of "...hingga 1.771651" that got
-            # separated by PDF extraction. The tell-tale sign is:
-            # - This line is just [word] + space + [number]
-            # - The previous line already had a complete statement (ended with `)` or `"`)
-            # - The previous line ALSO had a "hingga" or similar word inside it
             if filtered:
                 prev_t = filtered[-1].rstrip()
-                # Check if previous line had "hingga" or similar connective word
-                # AND ended with what looks like a complete expression
                 prev_has_hingga = bool(re.search(r"\b(hingga|sampai|to|until)\b", prev_t, re.IGNORECASE))
                 prev_ends_complete = bool(re.search(r'[)"\']\s*$', prev_t))
                 if prev_has_hingga and prev_ends_complete:
                     continue
-                # Or: previous line ends with non-terminator char (so this could be continuation)
                 if prev_t and not prev_t.endswith((";", ":", ",", "(", "[", "{", "+", "-", "*", "/", "=", "<", ">", ")", "]", "}", '"', "'")):
                     continue
         filtered.append(line)
