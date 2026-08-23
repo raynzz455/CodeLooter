@@ -1,0 +1,31 @@
+# CodeLooter Dependencies
+
+## Node.js (Next.js app)
+Install semua dependency dengan: `npm install`
+
+- next ^16.2.9
+- react ^19.0.0
+- react-dom ^19.0.0
+- highlight.js ^11.11.1
+- officeparser ^7.2.2
+- lucide-react ^0.511.0
+
+## Python (PDF sidecar)
+Install dengan: `pip install -r requirements.txt`
+
+- pdfplumber >= 0.11.0
+
+PDF extraction menggunakan Python sidecar (`scripts/pdf_extract.py`) yang
+menganalisis font monospace untuk mendeteksi code block secara presisi.
+Untuk file non-PDF, tetap menggunakan `officeparser` (Node.js).
+
+## System dependencies (Linux/macOS)
+- `pdftotext` (poppler-utils) — fallback jika Python sidecar gagal
+  - Debian/Ubuntu: `apt install poppler-utils`
+  - macOS: `brew install poppler`
+
+## Verifikasi instalasi
+```bash
+python3 scripts/pdf_extract.py --help
+# Output: usage: pdf_extract.py [-h] pdf_path
+```

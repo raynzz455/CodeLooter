@@ -100,7 +100,11 @@ export default function Home() {
       if (!res.ok) { setExtractError(data.error ?? "Gagal mengekstrak kode"); return; }
       const blocks: CodeBlock[] = data.blocks ?? [];
       setExtractedBlocks(blocks);
-      if (blocks.length > 0 && blocks[0].lang !== "unknown") setSelectedLang(blocks[0].lang);
+      // Pilih bahasa default: blok pertama yang bukan "unknown", atau fallback ke blok pertama.
+      if (blocks.length > 0) {
+        const firstKnown = blocks.find((b) => b.lang !== "unknown");
+        setSelectedLang(firstKnown?.lang ?? blocks[0].lang);
+      }
     } catch {
       setExtractError("Koneksi gagal — coba lagi");
     } finally {

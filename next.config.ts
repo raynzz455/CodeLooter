@@ -10,8 +10,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  // Prevent webpack from bundling these CJS-only packages
-  serverExternalPackages: ["pdf-parse", "mammoth"],
+  // officeparser memuat pdfjs worker secara dinamis; tandai sebagai
+  // server-external supaya tidak dibundle oleh webpack/turbopack.
+  serverExternalPackages: ["officeparser"],
 };
 
 export default nextConfig;
