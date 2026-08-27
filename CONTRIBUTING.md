@@ -8,6 +8,7 @@ Sebelum mulai, pastikan Anda punya:
 
 - Node.js 18 atau lebih baru (cek dengan `node --version`)
 - Python 3.11 atau lebih baru (cek dengan `python3 --version`)
+- uv (Python package manager, jauh lebih cepat dari pip). Install: https://docs.astral.sh/uv/
 - Git (cek dengan `git --version`)
 - Akun Supabase (free tier cukup) di https://supabase.com
 - Docker dan Docker Compose (opsional, untuk dev lokal terisolasi)
@@ -36,10 +37,19 @@ Untuk dukungan OCR (PDF image-based):
    cd backend
    cp .env.example .env
    # Edit .env, isi dengan nilai dari Supabase dashboard
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload --port 8000
+
+   # Install dependencies via uv (reproducible dari uv.lock)
+   uv sync
+
+   # Jalankan dev server
+   uv run uvicorn app.main:app --reload --port 8000
    ```
    BE akan jalan di http://localhost:8000. Swagger docs di http://localhost:8000/docs.
+
+   **Catatan**: Untuk install dependency dev (pytest, ruff, black):
+   ```bash
+   uv sync --extra dev
+   ```
 
 4. **Setup frontend** (di terminal baru):
    ```bash
@@ -182,14 +192,18 @@ export function CodeBlock({ code, lang, onCopy }: CodeBlockProps) {
 
 ```bash
 cd backend
+
+# Install dev dependencies (pytest, ruff, black, dll)
+uv sync --extra dev
+
 # Run all tests (TODO: tambah pytest test suite)
-pytest
+uv run pytest
 
 # Run specific test file
-pytest tests/test_language_detection.py
+uv run pytest tests/test_language_detection.py
 
 # Run with coverage
-pytest --cov=app --cov-report=html
+uv run pytest --cov=app --cov-report=html
 ```
 
 ### Frontend
@@ -210,11 +224,60 @@ curl -X POST -F 'file=@sample.pdf' http://localhost:8000/api/extract
 
 # Test language detection
 cd backend
-python3 -c "
+uv run python -c "
 from app.language_detection import detect_language
 print(detect_language('print(\"hello\")'))
 "
 ```
+
+## Python Dependency Management dengan uv
+
+CodeLooter backend menggunakan [uv](https://docs.astral.sh/uv/) sebagai Python package manager.
+
+### Kenapa uv?
+
+- 10-100x lebih cepat dari pip
+- Lockfile reproducible (`uv.lock`)
+- Manajemen virtualenv otomatis (`.venv` di backend folder)
+- Kompatibel dengan `pyproject.toml` (PEP 621)
+
+### Commands umum
+
+```bash
+# Install semua dependencies (dari uv.lock, reproducible)
+uv sync
+
+# Install + dev dependencies
+uv sync --extra dev
+
+# Tambah dependency baru
+uv add <package-name>
+# Contoh: uv add redis
+
+# Tambah dev dependency
+uv add --dev <package-name>
+# Contoh: uv add --dev pytest
+
+# Update lockfile (kalau pyproject.toml berubah manual)
+uv lock
+
+# Update semua dependency ke versi terbaru
+uv lock --upgrade
+
+# Run command dalam virtualenv
+uv run <command>
+# Contoh: uv run python script.py
+#         uv run uvicorn app.main:app --reload
+
+# Lihat dependency tree
+uv tree
+```
+
+### File terkait
+
+- `backend/pyproject.toml` — deklarasi dependencies (modern standard)
+- `backend/uv.lock` — lockfile reproducible (commit ke git, jangan edit manual)
+- `backend/.venv/` — virtualenv auto-managed (di .gitignore)
 
 ## Struktur Repo
 

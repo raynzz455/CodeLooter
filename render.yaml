@@ -1,17 +1,22 @@
 # Render config untuk backend CodeLooter API
+# Pakai uv sebagai Python package manager (lebih cepat dari pip)
 # Docs: https://render.com/docs/blueprint-spec
-# Deploy: connect GitHub repo → Render akan auto-detect render.yaml
+# Render mendukung uv: https://docs.astral.sh/uv/guides/integration/render/
 
 services:
   - type: web
     name: codelooter-api
     runtime: python
-    region: singapore  # atau oregon / frankfurt tergantung user base
+    region: singapore
     plan: free  # 512MB RAM, sleep after 15 min idle. Untuk production: starter ($7/mo)
     branch: main
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Build: install uv lalu sync dependencies
+    # uv sync jauh lebih cepat dari pip install (10-100x lebih cepat)
+    buildCommand: |
+      pip install uv &&
+      uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -29,10 +34,9 @@ services:
         value: '50'
       - key: PYTHON_VERSION
         value: '3.12.0'
-      # System dependencies untuk pdfplumber + Tesseract OCR
-      - key: RENDER_BUILD_HOOK
-        sync: false
 
-# Catatan: Render Python runtime TIDAK punya Tesseract & pdftotext pre-installed.
-# Untuk OCR fallback, perlu pakai Docker (lihat Dockerfile alternatif).
-# Untuk V1 tanpa OCR, Render free tier cukup.
+# Catatan: Render Python runtime TIDAK punya Tesseract + poppler pre-installed.
+# Untuk OCR support (image-based PDF), pakai Docker:
+#   1. Ganti runtime dari "python" ke "Docker"
+#   2. Dockerfile path: backend/Dockerfile (sudah include Tesseract + poppler + uv)
+#   3. Hapus buildCommand dan startCommand (Dockerfile yang handle)

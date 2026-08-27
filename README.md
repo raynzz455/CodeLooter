@@ -160,6 +160,7 @@ CodeLooter/
 
 - Node.js 18 atau lebih baru.
 - Python 3.11 atau lebih baru.
+- uv (Python package manager, jauh lebih cepat dari pip). Install: https://docs.astral.sh/uv/
 - Akun Supabase (https://supabase.com, free tier tersedia).
 - Tesseract OCR dan poppler-utils untuk dukungan OCR (opsional, hanya untuk PDF image-based):
   ```
@@ -190,11 +191,11 @@ cp .env.example .env
 # CL_JWT_SECRET=<generate dengan: openssl rand -base64 48>
 # CL_CORS_ORIGINS=["http://localhost:3000"]
 
-# Install dependency Python
-pip install -r requirements.txt
+# Install dependency Python via uv (reproducible dari uv.lock)
+uv sync
 
 # Jalankan server development
-uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 Backend akan berjalan di http://localhost:8000. Dokumentasi Swagger tersedia di http://localhost:8000/docs.
@@ -232,8 +233,8 @@ Frontend akan berjalan di http://localhost:3000.
    - Name: `codelooter-api` (atau sesuai selera)
    - Runtime: Python 3
    - Root Directory: `backend`
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - Build Command: `pip install uv && uv sync --frozen --no-dev`
+   - Start Command: `uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - Instance Type: Free atau Starter (rekomendasi Starter untuk OCR)
 4. Pada bagian Environment, tambah semua variabel dari `.env` lokal:
    - `CL_SUPABASE_URL`
@@ -245,7 +246,7 @@ Frontend akan berjalan di http://localhost:3000.
 
 Untuk dukungan OCR (PDF image-based), pakai Docker image:
 - Ganti service type menjadi Docker.
-- Dockerfile path: `backend/Dockerfile` (sudah include Tesseract dan poppler).
+- Dockerfile path: `backend/Dockerfile` (sudah include Tesseract, poppler, dan uv).
 
 ### Database Supabase
 

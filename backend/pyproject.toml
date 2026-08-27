@@ -1,0 +1,72 @@
+[project]
+name = "codelooter-backend"
+version = "0.3.0"
+description = "CodeLooter FastAPI backend — extract code blocks from documents"
+requires-python = ">=3.11"
+authors = [
+    { name = "raynzz455", email = "raynss455x@gmail.com" }
+]
+dependencies = [
+    # Web framework
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "python-multipart==0.0.20",
+    "pydantic==2.10.4",
+    "pydantic[email]>=2.0",
+    "pydantic-settings==2.7.1",
+    # Auth
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    # Database
+    "supabase==2.10.0",
+    # PDF + OCR
+    "pdfplumber==0.11.9",
+    "pytesseract==0.3.13",
+    "Pillow==11.1.0",
+    # Language detection
+    "pygments>=2.18",
+    # Office formats
+    "python-docx==1.1.2",
+    "python-pptx==1.0.2",
+    "openpyxl==3.1.5",
+    # Rate limiting + caching
+    "slowapi==0.1.9",
+    "redis==5.2.1",
+    # Utils
+    "pyyaml==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6.0",
+    "black>=24.0",
+    "mypy>=1.10",
+]
+
+# CodeLooter backend adalah aplikasi (bukan library yang didistribusikan),
+# jadi disable build system supaya uv sync hanya install dependencies,
+# tidak build wheel package.
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"

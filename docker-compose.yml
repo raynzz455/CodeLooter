@@ -1,6 +1,9 @@
 # Docker Compose untuk CodeLooter local development
 # ─────────────────────────────────────────────────────────────
-# Menjalankan: FE (Next.js) + BE (FastAPI) + Redis (untuk caching future)
+# Menjalankan: FE (Next.js) + BE (FastAPI) + Redis (untuk caching)
+#
+# Backend pakai uv (https://docs.astral.sh/uv/) sebagai Python package manager.
+# uv jauh lebih cepat dari pip (10-100x) dan punya lockfile reproducible.
 #
 # Usage:
 #   1. Copy .env.local.example ke .env.local (FE)

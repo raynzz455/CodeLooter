@@ -32,3 +32,9 @@ backend/scripts/__pycache__/
 
 # Vercel
 .vercel/
+
+# uv (Python package manager)
+backend/.venv/
+backend/.ruff_cache/
+backend/.pytest_cache/
+backend/htmlcov/

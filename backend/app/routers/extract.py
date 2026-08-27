@@ -496,7 +496,7 @@ def extract_docx(content: bytes) -> list[CodeBlock]:
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="python-docx tidak terinstall. Run: pip install python-docx"
+            detail="python-docx tidak terinstall. Run: uv add python-docx"
         )
 
     import io
@@ -531,7 +531,7 @@ def extract_pptx(content: bytes) -> list[CodeBlock]:
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="python-pptx tidak terinstall. Run: pip install python-pptx"
+            detail="python-pptx tidak terinstall. Run: uv add python-pptx"
         )
 
     import io
@@ -563,7 +563,7 @@ def extract_xlsx(content: bytes) -> list[CodeBlock]:
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="openpyxl tidak terinstall. Run: pip install openpyxl"
+            detail="openpyxl tidak terinstall. Run: uv add openpyxl"
         )
 
     import io

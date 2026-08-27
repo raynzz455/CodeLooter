@@ -22,7 +22,7 @@ from collections import defaultdict, Counter
 try:
     import pdfplumber
 except ImportError:
-    print(json.dumps({"error": "pdfplumber not installed. Run: pip install pdfplumber"}))
+    print(json.dumps({"error": "pdfplumber not installed. Run: uv add pdfplumber"}))
     sys.exit(1)
 
 try:
