@@ -351,11 +351,11 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
 
     # HEURISTIC FALLBACK (sebelum OCR)
     # Kalau font-analysis return 0 blocks (PDF tanpa font monospace),
-    # coba pakai pdftotext -layout + heuristic token-density.
+    # coba pakai mini-model (PyMuPDF + probabilistic scoring).
     # Ini jauh lebih cepat dari OCR (detik vs 60+ detik).
     heuristic_used = False
     if len(merged) == 0:
-        print("[pdf_extract] No font-based blocks found. Trying heuristic fallback...", file=sys.stderr)
+        print("[pdf_extract] No font-based blocks found. Trying mini-model fallback...", file=sys.stderr)
         heuristic_blocks = heuristic_extract_blocks(pdf_path)
         if heuristic_blocks:
             merged = heuristic_blocks
@@ -383,29 +383,41 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
     }
 
 
-# ─── Heuristic fallback (PyMuPDF + token-density scoring) ───
+# ─── Heuristic fallback via Mini-Model (PyMuPDF + probabilistic scoring) ───
 def heuristic_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
     """Fallback ketika font-analysis return 0 blocks.
 
-    Pakai PyMuPDF (fitz) untuk extract text dengan posisi per halaman,
-    lalu heuristic token-density untuk identifikasi baris kode.
+    Pakai Mini-Model: PyMuPDF untuk extract text + probabilistic scoring
+    dengan context-aware features (keyword, punct, density, continuation).
 
-    PyMuPDF dipilih karena:
-    - Lebih akurat dari pdftotext untuk preserve whitespace & indent
-    - Bisa track nomor halaman (untuk multi-page PDF)
-    - Cepat (10x lebih cepat dari pdfplumber untuk text extraction)
-    - Bisa detect code blocks berdasarkan indent + font size
-
-    Cocok untuk PDF text-based yang TIDAK pakai font monospace untuk kode
-    (mis. modul praktikum yang dibuat di Word dengan font Times New Roman).
+    Mini-model mengatasi kelemahan metode lama (line-by-line scoring):
+    - Region clustering: group baris adjacent dengan code_prob > threshold
+    - Context-aware: look-back & look-ahead 5 baris untuk boost
+    - Anti-greedy-splitting: jangan putus blok kalau cuma 1 baris non-kode
     """
-    # Coba PyMuPDF dulu (lebih akurat, track page number)
-    blocks = _heuristic_via_pymupdf(pdf_path)
+    # Coba mini-model dulu (paling akurat)
+    blocks = _minimodel_extract(pdf_path)
     if blocks:
         return blocks
 
     # Fallback: pdftotext -layout (kalau PyMuPDF gagal)
     return _heuristic_via_pdftotext(pdf_path)
+
+
+def _minimodel_extract(pdf_path: str) -> List[Dict[str, Any]]:
+    """Mini-model: PyMuPDF + probabilistic scoring dengan context."""
+    # Import inline supaya tidak crash kalau pymupdf tidak terinstall
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from minimodel_extract import extract_code_blocks
+        return extract_code_blocks(pdf_path)
+    except ImportError:
+        return []
+    except Exception as e:
+        print(f"[pdf_extract] Mini-model error: {e}", file=sys.stderr)
+        return []
 
 
 def _heuristic_via_pymupdf(pdf_path: str) -> List[Dict[str, Any]]:
