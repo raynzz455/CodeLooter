@@ -18,6 +18,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request
 from pydantic import BaseModel
 
 from ..language_detection import detect_language
+from ..llm_detection import detect_languages_llm
 from ..rate_limit import limiter
 from ..cache import get_cached, set_cached, get_cache_stats, clear_cache
 
@@ -131,10 +132,13 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
     else:
         raise HTTPException(status_code=400, detail=f"Format .{ext} tidak didukung")
 
-    # Deteksi bahasa untuk setiap block
-    for block in blocks:
-        if not block.lang or block.lang == "unknown":
-            block.lang = detect_language(block.code)
+    # Deteksi bahasa untuk semua blocks SEKALIGUS via LLM (batch, 1 request)
+    # LLM jauh lebih akurat dari heuristic untuk R vs Python distinction
+    if blocks:
+        codes = [b.code for b in blocks]
+        langs = detect_languages_llm(codes)
+        for i, lang in enumerate(langs):
+            blocks[i].lang = lang or "unknown"
 
     response = ExtractResponse(
         blocks=blocks,

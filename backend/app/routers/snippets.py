@@ -244,36 +244,41 @@ def download_snippet(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
 
-    # Mode 2: download all blocks (gabung jadi 1 file kalau 1 bahasa, ZIP kalau multi)
+    # Mode 2: download all blocks
+    # Gabung SEMUA blocks jadi 1 file, ext berdasarkan bahasa MAYORITAS
     if len(blocks) == 0:
         raise HTTPException(status_code=400, detail="Snippet kosong, tidak ada yang di-download")
 
-    # Cek apakah semua block bahasa sama
-    langs = set(b["lang"] for b in blocks)
-    if len(langs) == 1:
-        # Single language: gabung jadi 1 file
-        lang = next(iter(langs))
-        ext = get_ext(lang)
-        combined = "\n\n".join(f"# === Block {b['index']} ===\n{b['code']}" for b in blocks)
-        content = combined.encode("utf-8")
-        filename = f"{base_filename}_all.{ext}"
-        return StreamingResponse(
-            io.BytesIO(content),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
+    # Hitung bahasa mayoritas (voting)
+    from collections import Counter
+    lang_counts = Counter(b["lang"] for b in blocks)
+    majority_lang = lang_counts.most_common(1)[0][0] if lang_counts else "unknown"
+    ext = get_ext(majority_lang)
 
-    # Multi-language: ZIP berisi multiple files
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for b in blocks:
-            ext = get_ext(b["lang"])
-            filename = f"{base_filename}_{b['index']}_{b['lang']}.{ext}"
-            zf.writestr(filename, b["code"])
-    zip_buffer.seek(0)
+    # Gabung semua blocks jadi 1 file
+    # Pisah tiap block dengan komentar separator
+    combined_parts = []
+    for b in blocks:
+        lang = b["lang"]
+        # Comment separator sesuai bahasa
+        if ext in ("py",):
+            sep = f"# {'=' * 60}\n# Block {b['index']} ({lang})\n# {'=' * 60}\n"
+        elif ext in ("R",):
+            sep = f"# {'=' * 60}\n# Block {b['index']} ({lang})\n# {'=' * 60}\n"
+        elif ext in ("js", "ts", "java", "cpp", "c", "kt", "go", "rs", "swift", "scala"):
+            sep = f"// {'=' * 60}\n// Block {b['index']} ({lang})\n// {'=' * 60}\n"
+        elif ext in ("sql",):
+            sep = f"-- {'=' * 60}\n-- Block {b['index']} ({lang})\n-- {'=' * 60}\n"
+        else:
+            sep = f"# === Block {b['index']} ({lang}) ===\n"
+        combined_parts.append(sep + b["code"])
+
+    combined = "\n\n".join(combined_parts)
+    content = combined.encode("utf-8")
+    filename = f"{base_filename}_all.{ext}"
 
     return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{base_filename}_all.zip"'}
+        io.BytesIO(content),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
