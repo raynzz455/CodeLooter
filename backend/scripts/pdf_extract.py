@@ -346,10 +346,22 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
         "math": sorted({normalize_fontname(f) for f in font_stats if any(p in normalize_fontname(f).lower() for p in MATH_FONT_PATTERNS)}),
     }
 
-    # OCR FALLBACK
+    # HEURISTIC FALLBACK (sebelum OCR)
+    # Kalau font-analysis return 0 blocks (PDF tanpa font monospace),
+    # coba pakai pdftotext -layout + heuristic token-density.
+    # Ini jauh lebih cepat dari OCR (detik vs 60+ detik).
+    heuristic_used = False
+    if len(merged) == 0:
+        print("[pdf_extract] No font-based blocks found. Trying heuristic fallback...", file=sys.stderr)
+        heuristic_blocks = heuristic_extract_blocks(pdf_path)
+        if heuristic_blocks:
+            merged = heuristic_blocks
+            heuristic_used = True
+
+    # OCR FALLBACK (terakhir, kalau heuristic juga gagal)
     ocr_used = False
     if len(merged) == 0 and HAS_OCR:
-        print("[pdf_extract] No font-based blocks found. Trying OCR fallback...", file=sys.stderr)
+        print("[pdf_extract] Heuristic fallback also empty. Trying OCR fallback...", file=sys.stderr)
         ocr_blocks = ocr_extract_blocks(pdf_path)
         if ocr_blocks:
             merged = ocr_blocks
@@ -363,8 +375,212 @@ def detect_code_blocks(pdf_path: str) -> Dict[str, Any]:
             "code_chars": code_chars_count,
             "code_ratio": code_chars_count / total_chars if total_chars > 0 else 0,
             "ocr_used": ocr_used,
+            "heuristic_used": heuristic_used,
         },
     }
+
+
+# ─── Heuristic fallback (pdftotext + token-density scoring) ───
+def heuristic_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
+    """Fallback ketika font-analysis return 0 blocks.
+
+    Pakai pdftotext -layout untuk extract text, lalu heuristic token-density
+    untuk identifikasi baris kode. Sama dengan TXT extraction.
+
+    Cocok untuk PDF text-based yang TIDAK pakai font monospace untuk kode
+    (mis. modul praktikum yang dibuat di Word dengan font Times New Roman).
+    """
+    import subprocess
+
+    # Extract text via pdftotext -layout (preserve whitespace)
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", "-enc", "UTF-8", pdf_path, "-"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return []
+        text = result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return []
+
+    if not text or not text.strip():
+        return []
+
+    # Pakai heuristic scoring yang sama dengan TXT
+    lines = text.split("\n")
+
+    def score_line(line: str) -> int:
+        t = line.strip()
+        if not t:
+            return 0
+        score = 0
+        # Code keywords
+        if re.search(r"\b(def|class|import|from|return|if|else|elif|for|while|"
+                     r"function|var|let|const|public|private|static|void|int|float|"
+                     r"library|require|print|echo|SELECT|FROM|WHERE|"
+                     r"data\.frame|read\.csv|read\.table|read\.xlsx|"
+                     r"summary|lm|glm|aov|t\.test|chisq\.test|cor\.test|"
+                     r"ggplot|plot|abline|hist|boxplot|"
+                     r"qt|qnorm|qf|qchisq|pt|pnorm|pf|pchisq|dt|dnorm|df|dchisq|"
+                     r"sample|set\.seed|c\(|seq|rep|"
+                     r"head|tail|str|names|colnames|rownames|nrow|ncol|"
+                     r"mean|median|sd|var|sum|max|min|sqrt|abs|round|floor|ceiling|"
+                     r"cbind|rbind|merge|subset|transform|"
+                     r"mutate|filter|select|group_by|summarise|arrange|"
+                     r"cat|paste|paste0|sprintf|format|"
+                     r"install\.packages)\b", t):
+            score += 3
+        # Assignment operators (R-style)
+        if re.search(r"\w+\s*<-", t):
+            score += 3
+        if re.search(r"<-|->|%>%|:=", t):
+            score += 2
+        # Function calls
+        if re.search(r"\b\w+\s*\(", t):
+            score += 1
+        # Comments
+        if re.match(r"^\s*#", t):
+            score += 1
+        # Code symbols
+        if re.search(r"[(){}\[\];=<>+\-*/\\&|!?:,'\".]", t):
+            score += 1
+        # String literals
+        if re.search(r'["\'].*["\']', t):
+            score += 1
+        # Penalty for prose (terlalu banyak kata biasa)
+        # Indonesian + English prose words
+        prose_words = re.findall(r"\b(?:dan|atau|yang|untuk|pada|dengan|dari|ke|di|ini|itu|"
+                                r"adalah|akan|sebuah|seorang|mahasiswa|rata|selisih|"
+                                r"proporsi|signifikan|berbeda|menggunakan|menghitung|"
+                                r"the|and|or|for|with|from|to|in|of|a|an|is|are|was|were)\b",
+                                t, re.IGNORECASE)
+        if len(prose_words) >= 2:
+            score -= 2
+        # Reject pure math expressions (Rumus)
+        # Unicode math symbols: U+1D400-1D7FF (Mathematical Alphanumeric Symbols),
+        # U+1EE00-1EEFF (Arabic Mathematical Alphabetic Symbols),
+        # U+2200-22FF (Mathematical Operators)
+        if re.search("[\U0001D400-\U0001D7FF\U0001EE00-\U0001EEFF\u2200-\u22FF]", t):
+            score = 0
+        return score
+
+    # Group adjacent kode-like lines jadi blocks
+    # Strategi:
+    # - Baris dengan score >= THRESHOLD dianggap kode
+    # - Baris `##` (R output) dianggap "soft" — boleh ikut blok kalau ada kode
+    #   sebelum/sesudahnya, tapi tidak boleh membentuk blok sendiri (hanya ##)
+    # - Baris dengan `library(` atau `# Kasus N` di awal → mulai blok baru
+    blocks = []
+    current_block_lines = []
+    THRESHOLD = 2
+
+    def is_r_output(line):
+        t = line.strip()
+        return t.startswith("## ") or t.startswith("##\t") or t.startswith("[1] ")
+
+    def is_block_start(line):
+        """Baris yang menandakan mulai blok kode baru."""
+        t = line.strip()
+        # R library() call = sering awal blok
+        if re.match(r"^\s*library\s*\(", t):
+            return True
+        # Data assignment ke data.frame (awal sesi baru)
+        if re.search(r"<-\s*data\.frame\s*\(", t):
+            return True
+        # Komentar "# Kasus N" atau "# Soal N"
+        if re.match(r"^\s*#\s*(kasus|soal|contoh|latihan)\s+\d", t, re.IGNORECASE):
+            return True
+        return False
+
+    for line in lines:
+        if score_line(line) >= THRESHOLD or is_r_output(line):
+            # Kalau baris ini adalah "block start" dan kita sudah punya blok
+            # berjalan, simpan blok sebelumnya lalu mulai baru
+            if is_block_start(line) and current_block_lines:
+                real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+                if len(real_code_lines) >= 1:
+                    code = "\n".join(current_block_lines).strip()
+                    if len(code) >= 10:
+                        blocks.append({
+                            "code": code,
+                            "page": 1,
+                            "lines": code.count("\n") + 1,
+                            "source": "heuristic",
+                        })
+                current_block_lines = []
+            current_block_lines.append(line)
+        else:
+            # Baris non-kode → simpan blok kalau ada
+            if len(current_block_lines) >= 2:
+                real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+                if real_code_lines:
+                    code = "\n".join(current_block_lines).strip()
+                    if len(code) >= 10:
+                        blocks.append({
+                            "code": code,
+                            "page": 1,
+                            "lines": code.count("\n") + 1,
+                            "source": "heuristic",
+                        })
+            current_block_lines = []
+
+    # Flush sisa
+    if len(current_block_lines) >= 2:
+        real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+        if real_code_lines:
+            code = "\n".join(current_block_lines).strip()
+            if len(code) >= 10:
+                blocks.append({
+                    "code": code,
+                    "page": 1,
+                    "lines": code.count("\n") + 1,
+                    "source": "heuristic",
+                })
+
+    # Post-process: pisah blok yang mengandung ## output di tengah
+    # Strategi: kalau ada baris ## di tengah blok, pisah jadi:
+    # - blok kode sebelum ##
+    # - blok kode setelah ## (kalau ada)
+    final_blocks = []
+    for b in blocks:
+        code_lines = b["code"].split("\n")
+        # Cari posisi baris ## pertama yang BUKAN di akhir blok
+        r_output_indices = [i for i, l in enumerate(code_lines) if is_r_output(l)]
+        if not r_output_indices:
+            final_blocks.append(b)
+            continue
+
+        # Pisah: kode sebelum ##, ## output (skip), kode setelah ##
+        current_chunk = []
+        for line in code_lines:
+            if is_r_output(line):
+                # Simpan chunk sebelumnya kalau ada
+                if current_chunk:
+                    code = "\n".join(current_chunk).strip()
+                    if len(code) >= 10:
+                        final_blocks.append({
+                            "code": code,
+                            "page": 1,
+                            "lines": code.count("\n") + 1,
+                            "source": "heuristic",
+                        })
+                    current_chunk = []
+                # Skip R output
+            else:
+                current_chunk.append(line)
+        # Flush sisa
+        if current_chunk:
+            code = "\n".join(current_chunk).strip()
+            if len(code) >= 10:
+                final_blocks.append({
+                    "code": code,
+                    "page": 1,
+                    "lines": code.count("\n") + 1,
+                    "source": "heuristic",
+                })
+
+    return final_blocks
 
 
 # ─── OCR Fallback via Tesseract ───

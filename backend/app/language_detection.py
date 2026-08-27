@@ -99,7 +99,6 @@ JAVA_PATTERNS = [
 def detect_r(code: str) -> bool:
     """Deteksi apakah kode adalah R. Override pygments yang sering salah."""
     hits = sum(1 for p in R_PATTERNS if p.search(code))
-    # Bobot tinggi untuk pattern khas R
     strong_r = bool(re.search(
         r"\b(cat|qt|qnorm|qf|qchisq|qlnorm|qbeta|setwd|set\.seed|sapply|lapply|vapply|mapply)\s*\(",
         code
@@ -114,6 +113,38 @@ def detect_r(code: str) -> bool:
         return True
     if hits >= 4:
         return True
+
+    # Tambahan: deteksi R function calls khas (tanpa <- assignment)
+    # Cocok untuk snippet pendek seperti cor.test(...), chisq.test(...), data.frame(...)
+    r_function_calls = bool(re.search(
+        r"\b(cor\.test|chisq\.test|t\.test|aov|lm|glm|"
+        r"data\.frame|read\.csv|read\.table|read\.xlsx|"
+        r"summary|head|tail|str|names|colnames|rownames|"
+        r"cbind|rbind|merge|subset|transform|"
+        r"sample|seq|rep|c\s*\()\s*\(",
+        code
+    ))
+    r_dollar_notation = bool(re.search(r"\b\w+\$\w+", code))  # data$column
+    r_string_paste = bool(re.search(r"\bpaste0?\s*\(", code))
+    r_method_arg = bool(re.search(r"method\s*=\s*c\s*\(", code))
+    # R-specific function calls yang sangat jarang di Python/JS
+    r_strong_function = bool(re.search(
+        r"\b(chisq\.test|cor\.test|t\.test|aov|glm|"
+        r"data\.frame|read\.csv|read\.table|read\.xlsx|"
+        r"cbind|rbind|row\.names|col\.names|row\.sums|col\.sums|"
+        r"apply|sapply|lapply|vapply|mapply|"
+        r"set\.seed|qt|qnorm|qf|qchisq|pt|pnorm|pf|pchisq|dt|dnorm|df|dchisq)\s*\(",
+        code
+    ))
+
+    # Decision tree yang lebih longgar untuk modul statistik
+    if r_strong_function:
+        return True
+    if r_function_calls and (r_dollar_notation or r_string_paste or r_method_arg):
+        return True
+    if r_dollar_notation and (r_string_paste or r_method_arg or r_function_calls):
+        return True
+
     return False
 
 
