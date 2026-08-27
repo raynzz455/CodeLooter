@@ -592,7 +592,9 @@ def ocr_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
                 ["pdftoppm", "-png", "-r", "200", "-l", "20", pdf_path, f"{tmpdir}/page"],
                 check=True, capture_output=True, timeout=120,
             )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+            if isinstance(e, FileNotFoundError):
+                print("[pdf_extract] pdftoppm not installed. Install poppler-utils: apt install poppler-utils", file=sys.stderr)
             return []
 
         for img_file in sorted(os.listdir(tmpdir)):
@@ -611,56 +613,56 @@ def ocr_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
                 lines = result.stdout.split("\n")
                 if len(lines) < 2:
                     continue
-                line_data = defaultdict(list)
-                for line in lines[1:]:
-                    parts = line.split("\t")
-                    if len(parts) < 12:
-                        continue
-                    try:
-                        block_num = int(parts[2])
-                        par_num = int(parts[3])
-                        line_num = int(parts[4])
-                        top = int(parts[7])
-                        text = parts[11]
-                        if text.strip():
-                            key = (block_num, par_num, line_num)
-                            line_data[key].append((top, text))
-                    except (ValueError, IndexError):
-                        continue
-
-                page_lines = []
-                for key in sorted(line_data.keys()):
-                    parts_list = sorted(line_data[key])
-                    text = " ".join(t for _, t in parts_list).strip()
-                    if text:
-                        top = parts_list[0][0]
-                        page_lines.append({"page": page_num - 1, "top": top, "text": text})
-
-                candidate_lines = []
-                for line in page_lines:
-                    text = line["text"]
-                    if not text.strip():
-                        continue
-                    if is_ascii_art(text):
-                        continue
-                    if looks_like_code_line(text):
-                        candidate_lines.append(line)
-
-                if candidate_lines:
-                    current_block = [candidate_lines[0]]
-                    for line in candidate_lines[1:]:
-                        gap = line["top"] - current_block[-1]["top"]
-                        if gap <= 35:
-                            current_block.append(line)
-                        else:
-                            blocks.append(current_block)
-                            current_block = [line]
-                    blocks.append(current_block)
-
-            except subprocess.TimeoutExpired:
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                if isinstance(e, FileNotFoundError):
+                    print("[pdf_extract] tesseract not installed. Install: apt install tesseract-ocr", file=sys.stderr)
                 continue
-            except Exception:
-                continue
+
+            line_data = defaultdict(list)
+            for line in lines[1:]:
+                parts = line.split("\t")
+                if len(parts) < 12:
+                    continue
+                try:
+                    block_num = int(parts[2])
+                    par_num = int(parts[3])
+                    line_num = int(parts[4])
+                    top = int(parts[7])
+                    text = parts[11]
+                    if text.strip():
+                        key = (block_num, par_num, line_num)
+                        line_data[key].append((top, text))
+                except (ValueError, IndexError):
+                    continue
+
+            page_lines = []
+            for key in sorted(line_data.keys()):
+                parts_list = sorted(line_data[key])
+                text = " ".join(t for _, t in parts_list).strip()
+                if text:
+                    top = parts_list[0][0]
+                    page_lines.append({"page": page_num - 1, "top": top, "text": text})
+
+            candidate_lines = []
+            for line in page_lines:
+                text = line["text"]
+                if not text.strip():
+                    continue
+                if is_ascii_art(text):
+                    continue
+                if looks_like_code_line(text):
+                    candidate_lines.append(line)
+
+            if candidate_lines:
+                current_block = [candidate_lines[0]]
+                for line in candidate_lines[1:]:
+                    gap = line["top"] - current_block[-1]["top"]
+                    if gap <= 35:
+                        current_block.append(line)
+                    else:
+                        blocks.append(current_block)
+                        current_block = [line]
+                blocks.append(current_block)
 
     output = []
     for block in blocks:

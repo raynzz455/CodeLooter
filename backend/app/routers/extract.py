@@ -403,68 +403,170 @@ def extract_latex(text: str) -> list[CodeBlock]:
 
 
 def extract_txt_heuristic(text: str) -> list[CodeBlock]:
-    """Heuristic sederhana untuk TXT — pakai scoring kode-like per baris."""
+    """Heuristic untuk TXT/DOCX — pakai scoring kode-like per baris.
+
+    Sama dengan heuristic di pdf_extract.py:
+    - R-specific keywords (+3)
+    - Assignment <- (+3)
+    - Pipe %>% (+2)
+    - Function call, comment, string (+1)
+    - Prose penalty (-2)
+    - ## R output dianggap "soft" (boleh ikut blok, tidak membentuk blok sendiri)
+    - Block start detection: library(), data.frame(), # Kasus N
+    - Post-process: strip ## R output, pisah blok yang mengandung ##
+    """
     lines = text.split("\n")
     if not lines:
         return []
 
-    # Score setiap baris
     def score_line(line: str) -> int:
         t = line.strip()
         if not t:
             return 0
-        # Pattern kode umum
         score = 0
-        if re.search(r"\b(def|class|import|from|return|if|else|elif|for|while|"
+        # R-specific keywords (bobot tinggi)
+        if re.search(r"\b(library|require|data\.frame|read\.csv|read\.table|read\.xlsx|"
+                     r"summary|lm|glm|aov|cor\.test|chisq\.test|t\.test|"
+                     r"ggplot|plot|abline|hist|boxplot|"
+                     r"qt|qnorm|qf|qchisq|pt|pnorm|"
+                     r"sample|set\.seed|c\s*\(|seq|rep|"
+                     r"head|tail|str|names|colnames|rownames|"
+                     r"mean|median|sd|var|sum|sqrt|abs|round|"
+                     r"cbind|rbind|merge|subset|transform|"
+                     r"cat|paste|paste0|sprintf|"
+                     r"def|class|import|from|return|if|else|elif|for|while|"
                      r"function|var|let|const|public|private|static|void|int|float|"
-                     r"library|require|print|echo|SELECT|FROM|WHERE)\b", t):
-            score += 2
-        if re.search(r"[(){}\[\];=<>+\-*/\\&|!?:,'\".]", t):
-            score += 1
-        if re.search(r"\b\w+\s*\(", t):  # function call
-            score += 1
+                     r"print|echo|SELECT|FROM|WHERE)\b", t):
+            score += 3
+        # R assignment operator
+        if re.search(r"\w+\s*<-", t):
+            score += 3
         if re.search(r"<-|->|%>%|:=", t):
             score += 2
+        # Function call
+        if re.search(r"\b\w+\s*\(", t):
+            score += 1
+        # Comment
         if re.match(r"^\s*#", t):
             score += 1
+        # Code symbols
+        if re.search(r"[(){}\[\];=<>+\-*/\\&|!?:,'\".]", t):
+            score += 1
+        # String literal
+        if re.search(r'["\'].*["\']', t):
+            score += 1
+        # Prose penalty
+        prose_words = re.findall(r"\b(?:dan|atau|yang|untuk|pada|dengan|dari|ke|di|ini|itu|"
+                                r"adalah|akan|sebuah|seorang|mahasiswa|rata|selisih|"
+                                r"proporsi|signifikan|berbeda|menggunakan|menghitung|"
+                                r"the|and|or|for|with|from|to|in|of|a|an|is|are|was|were)\b",
+                                t, re.IGNORECASE)
+        if len(prose_words) >= 2:
+            score -= 2
         return score
 
-    # Group adjacent kode-like lines jadi blocks
+    def is_r_output(line):
+        t = line.strip()
+        return t.startswith("## ") or t.startswith("##\t") or t.startswith("[1] ")
+
+    def is_block_start(line):
+        t = line.strip()
+        if re.match(r"^\s*library\s*\(", t):
+            return True
+        if re.search(r"<-\s*data\.frame\s*\(", t):
+            return True
+        if re.match(r"^\s*#\s*(kasus|soal|contoh|latihan)\s+\d", t, re.IGNORECASE):
+            return True
+        return False
+
     blocks = []
     current_block_lines = []
     idx = 0
     THRESHOLD = 2
 
     for line in lines:
-        if score_line(line) >= THRESHOLD:
+        if score_line(line) >= THRESHOLD or is_r_output(line):
+            if is_block_start(line) and current_block_lines:
+                real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+                if real_code_lines:
+                    code = "\n".join(current_block_lines).strip()
+                    if len(code) >= 10:
+                        blocks.append(CodeBlock(
+                            index=idx,
+                            lang="unknown",
+                            code=code,
+                            lines=code.count("\n") + 1,
+                            source="heuristic",
+                        ))
+                        idx += 1
+                current_block_lines = []
             current_block_lines.append(line)
         else:
             if len(current_block_lines) >= 2:
-                code = "\n".join(current_block_lines).strip()
-                if len(code) >= 10:
-                    blocks.append(CodeBlock(
-                        index=idx,
-                        lang="unknown",  # akan di-detect
-                        code=code,
-                        lines=code.count("\n") + 1,
-                        source="heuristic",
-                    ))
-                    idx += 1
+                real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+                if real_code_lines:
+                    code = "\n".join(current_block_lines).strip()
+                    if len(code) >= 10:
+                        blocks.append(CodeBlock(
+                            index=idx,
+                            lang="unknown",
+                            code=code,
+                            lines=code.count("\n") + 1,
+                            source="heuristic",
+                        ))
+                        idx += 1
             current_block_lines = []
 
-    # Flush sisa
     if len(current_block_lines) >= 2:
-        code = "\n".join(current_block_lines).strip()
-        if len(code) >= 10:
-            blocks.append(CodeBlock(
-                index=idx,
-                lang="unknown",
-                code=code,
-                lines=code.count("\n") + 1,
-                source="heuristic",
-            ))
+        real_code_lines = [l for l in current_block_lines if not is_r_output(l)]
+        if real_code_lines:
+            code = "\n".join(current_block_lines).strip()
+            if len(code) >= 10:
+                blocks.append(CodeBlock(
+                    index=idx,
+                    lang="unknown",
+                    code=code,
+                    lines=code.count("\n") + 1,
+                    source="heuristic",
+                ))
 
-    return blocks
+    # Post-process: strip ## R output, pisah blok yang mengandung ##
+    final_blocks = []
+    for b in blocks:
+        code_lines = b.code.split("\n")
+        r_output_indices = [i for i, l in enumerate(code_lines) if is_r_output(l)]
+        if not r_output_indices:
+            final_blocks.append(b)
+            continue
+
+        current_chunk = []
+        for line in code_lines:
+            if is_r_output(line):
+                if current_chunk:
+                    code = "\n".join(current_chunk).strip()
+                    if len(code) >= 10:
+                        final_blocks.append(CodeBlock(
+                            index=len(final_blocks),
+                            lang="unknown",
+                            code=code,
+                            lines=code.count("\n") + 1,
+                            source="heuristic",
+                        ))
+                    current_chunk = []
+            else:
+                current_chunk.append(line)
+        if current_chunk:
+            code = "\n".join(current_chunk).strip()
+            if len(code) >= 10:
+                final_blocks.append(CodeBlock(
+                    index=len(final_blocks),
+                    lang="unknown",
+                    code=code,
+                    lines=code.count("\n") + 1,
+                    source="heuristic",
+                ))
+
+    return final_blocks
 
 
 # ─── Office format extraction (DOCX, PPTX, XLSX) ───
