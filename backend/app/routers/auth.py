@@ -10,13 +10,14 @@ Untuk simplicity V1, kita bisa skip Supabase Auth dan kelola tabel
 `users` sendiri di schema public. Tapi tidak ada RLS otomatis.
 Schema SQL sudah handle ini via tabel `public.profiles`.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 from supabase import Client
 from ..auth import hash_password, verify_password, create_access_token, decode_access_token
 from ..supabase_client import get_supabase, get_supabase_admin
 from ..config import settings
+from ..rate_limit import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -68,7 +69,8 @@ class AuthOut(BaseModel):
 
 # ─── Routes ───
 @router.post("/register", response_model=AuthOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterIn):
+@limiter.limit("3/hour")
+def register(request: Request, payload: RegisterIn):
     """Register user baru. Password di-hash bcrypt dan disimpan ke Supabase."""
     admin = get_supabase_admin()
 
@@ -103,7 +105,8 @@ def register(payload: RegisterIn):
 
 
 @router.post("/login", response_model=AuthOut)
-def login(payload: LoginIn):
+@limiter.limit("5/minute")
+def login(request: Request, payload: LoginIn):
     """Login user. Verifikasi password, lalu issue JWT."""
     admin = get_supabase_admin()
     result = admin.table("profiles").select("*").eq("email", payload.email.lower()).execute()

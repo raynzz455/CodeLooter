@@ -18,6 +18,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request
 from pydantic import BaseModel
 
 from ..language_detection import detect_language
+from ..rate_limit import limiter
+from ..cache import get_cached, set_cached, get_cache_stats, clear_cache
 
 router = APIRouter(prefix="/extract", tags=["extract"])
 
@@ -62,6 +64,7 @@ class ExtractResponse(BaseModel):
 
 
 @router.post("", response_model=ExtractResponse)
+@limiter.limit("10/hour")
 async def extract_code(request: Request, file: UploadFile = File(...)):
     """Ekstrak code blocks dari file yang di-upload.
 
@@ -71,11 +74,11 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
     - IPYNB (.ipynb) — code cells
     - HTML (.html) — text content dengan code blocks
     - TXT / TEX / LATEX — plain text + LaTeX verbatim/lstlisting
-
-    Format yang belum didukung di BE (pakai FE route lama):
-    - DOCX, PPTX, XLSX (TODO: integrasi python-docx/python-pptx)
+    - DOCX, PPTX, XLSX — via python-docx / python-pptx / openpyxl
 
     File TIDAK disimpan ke DB. Hanya filename yang dipreserve di response.
+    Hasil di-cache 24 jam berdasarkan hash file content (Redis kalau tersedia,
+    in-memory fallback).
     """
     # Baca file
     content = await file.read()
@@ -99,6 +102,16 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
             detail=f"Format .{ext} tidak didukung. Format yang didukung: {', '.join(sorted(ALL_SUPPORTED_EXTS))}"
         )
 
+    # ─── Cek cache dulu ───
+    # Kalau file yang sama sudah pernah di-extract, return dari cache
+    # supaya tidak perlu jalankan sidecar lagi (hemat 5-60 detik).
+    cached = get_cached(content)
+    if cached is not None:
+        # Update filename (mungkin user upload nama beda tapi content sama)
+        cached["filename"] = filename
+        cached["cached"] = True
+        return ExtractResponse(**cached)
+
     # Route ke extractor yang sesuai
     if ext in PDF_EXTS:
         blocks = await extract_pdf(content, ext)
@@ -111,11 +124,7 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
     elif ext in PLAIN_TEXT_EXTS:
         blocks = extract_plain_text(content.decode("utf-8", errors="replace"), ext)
     elif ext in OFFICE_EXTS:
-        # TODO: implementasi pakai python-docx / python-pptx
-        raise HTTPException(
-            status_code=400,
-            detail=f"Format .{ext} belum didukung di BE. Sementara gunakan FE route lama /api/extract. Integrasi python-docx/python-pptx akan datang di iterasi berikutnya."
-        )
+        blocks = extract_office(content, ext)
     else:
         raise HTTPException(status_code=400, detail=f"Format .{ext} tidak didukung")
 
@@ -124,13 +133,31 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
         if not block.lang or block.lang == "unknown":
             block.lang = detect_language(block.code)
 
-    return ExtractResponse(
+    response = ExtractResponse(
         blocks=blocks,
         filename=filename,
         size=len(content),
         total=len(blocks),
         stats=None,
     )
+
+    # Simpan ke cache untuk request berikutnya
+    set_cached(content, response.model_dump())
+
+    return response
+
+
+@router.get("/cache/stats")
+def cache_stats():
+    """Stats cache untuk debugging/admin."""
+    return get_cache_stats()
+
+
+@router.delete("/cache")
+def cache_clear():
+    """Hapus semua cache (admin only — TODO: tambah auth admin)."""
+    count = clear_cache()
+    return {"cleared": count}
 
 
 # ─── PDF extraction via sidecar ───
@@ -438,3 +465,119 @@ def extract_txt_heuristic(text: str) -> list[CodeBlock]:
             ))
 
     return blocks
+
+
+# ─── Office format extraction (DOCX, PPTX, XLSX) ───
+def extract_office(content: bytes, ext: str) -> list[CodeBlock]:
+    """Ekstrak code blocks dari DOCX, PPTX, atau XLSX.
+
+    Strategi:
+    - DOCX: pakai python-docx. Iterasi paragraf, identifikasi baris kode via heuristic.
+      Plus extract text dari tabel (sering berisi kode di modul praktikum).
+    - PPTX: pakai python-pptx. Iterasi slides, extract text dari shapes.
+    - XLSX: pakai openpyxl. Iterasi cells, gabung jadi text, lalu heuristic.
+    """
+    import io
+
+    if ext == "docx":
+        return extract_docx(content)
+    elif ext == "pptx":
+        return extract_pptx(content)
+    elif ext == "xlsx":
+        return extract_xlsx(content)
+    else:
+        raise HTTPException(status_code=400, detail=f"Format Office .{ext} tidak didukung")
+
+
+def extract_docx(content: bytes) -> list[CodeBlock]:
+    """Ekstrak dari DOCX via python-docx."""
+    try:
+        from docx import Document
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="python-docx tidak terinstall. Run: pip install python-docx"
+        )
+
+    import io
+    doc = Document(io.BytesIO(content))
+
+    # Gabung semua paragraf + tabel jadi satu text
+    lines = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            lines.append(para.text)
+
+    # Extract dari tabel juga (sering berisi kode di modul praktikum)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                text = cell.text.strip()
+                if text:
+                    # Cell bisa multi-line, pisah
+                    for line in text.split("\n"):
+                        if line.strip():
+                            lines.append(line)
+
+    # Pakai heuristic yang sama dengan TXT untuk identifikasi kode
+    text = "\n".join(lines)
+    return extract_txt_heuristic(text)
+
+
+def extract_pptx(content: bytes) -> list[CodeBlock]:
+    """Ekstrak dari PPTX via python-pptx."""
+    try:
+        from pptx import Presentation
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="python-pptx tidak terinstall. Run: pip install python-pptx"
+        )
+
+    import io
+    prs = Presentation(io.BytesIO(content))
+
+    lines = []
+    for slide_idx, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    text = para.text.strip()
+                    if text:
+                        lines.append(text)
+            elif shape.has_table:
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        text = cell.text.strip()
+                        if text:
+                            lines.append(text)
+
+    text = "\n".join(lines)
+    return extract_txt_heuristic(text)
+
+
+def extract_xlsx(content: bytes) -> list[CodeBlock]:
+    """Ekstrak dari XLSX via openpyxl."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="openpyxl tidak terinstall. Run: pip install openpyxl"
+        )
+
+    import io
+    wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+
+    lines = []
+    for sheet in wb.worksheets:
+        for row in sheet.iter_rows(values_only=True):
+            for cell in row:
+                if cell is not None:
+                    text = str(cell).strip()
+                    if text:
+                        lines.append(text)
+
+    wb.close()
+    text = "\n".join(lines)
+    return extract_txt_heuristic(text)

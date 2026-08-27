@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import auth, extract, snippets
+from .rate_limit import setup_rate_limiting
 
 
 @asynccontextmanager
@@ -24,7 +25,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="CodeLooter API",
     description="Ekstrak kode dari dokumen & manajemen snippet user",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -36,6 +37,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting via slowapi
+setup_rate_limiting(app)
 
 # Register routers
 app.include_router(auth.router, prefix="/api")
