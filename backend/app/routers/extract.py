@@ -18,7 +18,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request
 from pydantic import BaseModel
 
 from ..language_detection import detect_language
-from ..llm_extract import extract_from_pdf as llm_extract_pdf, extract_from_text as llm_extract_text
+from ..pattern_extract import extract_from_pdf as pattern_extract_pdf, extract_from_text as pattern_extract_text
 from ..rate_limit import limiter
 from ..cache import get_cached, set_cached, get_cache_stats, clear_cache
 
@@ -118,13 +118,12 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
 
     # Route ke extractor yang sesuai
     if ext in PDF_EXTS:
-        # PDF: extract text via PyMuPDF, lalu LLM untuk identifikasi code blocks
-        # Tulis ke temp file supaya PyMuPDF bisa baca
+        # PDF: pattern-based extraction (marker + density)
         with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
         try:
-            raw_blocks = llm_extract_pdf(tmp_path)
+            raw_blocks = pattern_extract_pdf(tmp_path)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -136,16 +135,15 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
                 lang=b.get("lang", "unknown"),
                 code=b["code"],
                 lines=b["lines"],
-                source="llm",
+                source=b.get("source", "pattern"),
             )
             for i, b in enumerate(raw_blocks)
         ]
     elif ext in MARKDOWN_EXTS:
-        # MD: extract text, lalu LLM
-        raw_blocks = llm_extract_text(content.decode("utf-8", errors="replace"))
+        raw_blocks = pattern_extract_text(content.decode("utf-8", errors="replace"))
         blocks = [
             CodeBlock(index=i, lang=b.get("lang", "unknown"), code=b["code"],
-                      lines=b["lines"], source="llm")
+                      lines=b["lines"], source=b.get("source", "pattern"))
             for i, b in enumerate(raw_blocks)
         ]
     elif ext in IPYNB_EXTS:
@@ -153,11 +151,10 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
     elif ext in HTML_EXTS:
         blocks = extract_html(content.decode("utf-8", errors="replace"))
     elif ext in PLAIN_TEXT_EXTS:
-        # TXT/TEX: extract text, lalu LLM
-        raw_blocks = llm_extract_text(content.decode("utf-8", errors="replace"))
+        raw_blocks = pattern_extract_text(content.decode("utf-8", errors="replace"))
         blocks = [
             CodeBlock(index=i, lang=b.get("lang", "unknown"), code=b["code"],
-                      lines=b["lines"], source="llm")
+                      lines=b["lines"], source=b.get("source", "pattern"))
             for i, b in enumerate(raw_blocks)
         ]
     elif ext in OFFICE_EXTS:
