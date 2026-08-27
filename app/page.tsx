@@ -40,7 +40,8 @@ export default function Home() {
   const [splashDone, setSplashDone]       = useState(false);
   const [profileOpen, setProfileOpen]     = useState(false);
   const [user, setUser]                   = useState<User | null>(null);
-  const [selectedLang, setSelectedLang]   = useState("python");
+  const [selectedLang, setSelectedLang]   = useState("r");
+  const [extractLang, setExtractLang]     = useState("auto");
   const [dropdownOpen, setDropdownOpen]   = useState(false);
   const [uploadedFile, setUploadedFile]   = useState<File | null>(null);
   const [isDragging, setIsDragging]       = useState(false);
@@ -108,7 +109,7 @@ export default function Home() {
     setSavedSnippetId(null);
 
     try {
-      const data = await extractCode(uploadedFile);
+      const data = await extractCode(uploadedFile, extractLang);
       const blocks: CodeBlock[] = data.blocks ?? [];
       setExtractedBlocks(blocks);
       if (blocks.length > 0) {
@@ -371,6 +372,32 @@ export default function Home() {
                   )}
                   <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.pptx,.ppt,.xlsx,.xls,.txt,.md,.html,.ipynb,.tex" onChange={handleFileInput} style={{ display: "none" }} />
                 </div>
+
+                {/* Language selector */}
+                {uploadedFile && (
+                  <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 900, color: "#555", whiteSpace: "nowrap" }}>Bahasa:</label>
+                    <select
+                      value={extractLang}
+                      onChange={(e) => setExtractLang(e.target.value)}
+                      style={{ flex: 1, border: "2px solid #000", borderRadius: "8px", padding: "8px 12px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.85rem", backgroundColor: "#fef9f0", cursor: "pointer", outline: "none" }}
+                    >
+                      <option value="auto">Auto-detect</option>
+                      <option value="r">R</option>
+                      <option value="python">Python</option>
+                      <option value="sql">SQL</option>
+                      <option value="javascript">JavaScript</option>
+                      <option value="typescript">TypeScript</option>
+                      <option value="java">Java</option>
+                      <option value="cpp">C++</option>
+                      <option value="php">PHP</option>
+                      <option value="bash">Bash</option>
+                      <option value="html">HTML</option>
+                      <option value="css">CSS</option>
+                      <option value="json">JSON</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* extract button */}
                 <button onClick={handleExtract} disabled={!uploadedFile || isExtracting} style={{ marginTop: "12px", width: "100%", backgroundColor: uploadedFile ? "#000" : "#ccc", color: uploadedFile ? "#ffe8a3" : "#888", border: "3px solid #000", borderRadius: "10px", padding: "14px", fontFamily: "var(--font-display)", fontSize: "clamp(1rem,3vw,1.35rem)", letterSpacing: "0.06em", cursor: uploadedFile && !isExtracting ? "pointer" : "not-allowed", boxShadow: uploadedFile ? "5px 5px 0 #ff6b6b" : "none", transition: "transform 0.1s, box-shadow 0.1s", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", flexShrink: 0 }}

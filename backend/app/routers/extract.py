@@ -14,10 +14,9 @@ import re
 import tempfile
 import subprocess
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request, Query
 from pydantic import BaseModel
 
-from ..language_detection import detect_language
 from ..pattern_extract import extract_from_pdf as pattern_extract_pdf, extract_from_text as pattern_extract_text
 from ..rate_limit import limiter
 from ..cache import get_cached, set_cached, get_cache_stats, clear_cache
@@ -66,20 +65,19 @@ class ExtractResponse(BaseModel):
 
 @router.post("", response_model=ExtractResponse)
 @limiter.limit("10/hour")
-async def extract_code(request: Request, file: UploadFile = File(...)):
+async def extract_code(
+    request: Request,
+    file: UploadFile = File(...),
+    lang: str = Query("auto", description="Language: r, python, sql, java, cpp, javascript, typescript, php, kotlin, go, rust, bash, html, css, json, atau 'auto'"),
+):
     """Ekstrak code blocks dari file yang di-upload.
 
-    Format didukung:
-    - PDF (font-based + OCR fallback via Tesseract)
-    - Markdown (.md) — fenced code blocks
-    - IPYNB (.ipynb) — code cells
-    - HTML (.html) — text content dengan code blocks
-    - TXT / TEX / LATEX — plain text + LaTeX verbatim/lstlisting
-    - DOCX, PPTX, XLSX — via python-docx / python-pptx / openpyxl
+    Parameter lang:
+    - 'auto' (default): deteksi otomatis dari konten kode
+    - 'r': semua blok dianggap R (cocok untuk modul statistika)
+    - 'python', 'sql', 'java', dll.: paksa bahasa tertentu
 
-    File TIDAK disimpan ke DB. Hanya filename yang dipreserve di response.
-    Hasil di-cache 24 jam berdasarkan hash file content (Redis kalau tersedia,
-    in-memory fallback).
+    Format didukung: PDF, MD, IPYNB, HTML, TXT, TEX, DOCX, PPTX, XLSX
     """
     # Baca file
     content = await file.read()
@@ -161,6 +159,12 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
         blocks = extract_office(content, ext)
     else:
         raise HTTPException(status_code=400, detail=f"Format .{ext} tidak didukung")
+
+    # Apply language override
+    # Kalau user pilih lang != 'auto', paksa semua blok pakai bahasa tsb.
+    if lang and lang != "auto":
+        for b in blocks:
+            b.lang = lang
 
     response = ExtractResponse(
         blocks=blocks,

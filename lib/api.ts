@@ -122,10 +122,11 @@ export function logout() {
 }
 
 // ─── Extract ───
-export async function extractCode(file: File): Promise<ExtractResult> {
+export async function extractCode(file: File, lang: string = "auto"): Promise<ExtractResult> {
   const fd = new FormData();
   fd.append("file", file);
-  return await apiFetch("/extract", { method: "POST", body: fd }) as ExtractResult;
+  const url = lang && lang !== "auto" ? `/extract?lang=${encodeURIComponent(lang)}` : "/extract";
+  return await apiFetch(url, { method: "POST", body: fd }) as ExtractResult;
 }
 
 // ─── Snippets ───
