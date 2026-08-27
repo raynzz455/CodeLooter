@@ -9,6 +9,9 @@ Strategi:
 3. Single-line block support — untuk statement penting (CREATE DATABASE, import, def class)
 4. OCR fallback — pakai Tesseract untuk PDF berbasis gambar (image-based PDF)
 """
+import warnings
+warnings.filterwarnings("ignore")
+
 import sys
 import json
 import argparse
@@ -408,7 +411,7 @@ def heuristic_extract_blocks(pdf_path: str) -> List[Dict[str, Any]]:
 def _heuristic_via_pymupdf(pdf_path: str) -> List[Dict[str, Any]]:
     """Extract via PyMuPDF (fitz) — lebih akurat, track page number."""
     try:
-        import fitz  # PyMuPDF
+        import pymupdf as fitz  # PyMuPDF — pakai 'pymupdf' bukan 'fitz' (deprecated)
     except ImportError:
         return []
 

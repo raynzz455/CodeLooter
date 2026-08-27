@@ -193,7 +193,18 @@ async def extract_pdf(content: bytes, ext: str) -> list[CodeBlock]:
         )
 
     try:
-        result = json.loads(proc.stdout)
+        # Robust JSON parse: kalau ada warning text sebelum JSON (mis. dari
+        # PyMuPDF deprecation warning yang bocor ke stdout), find first '{'
+        # dan parse dari situ.
+        stdout = proc.stdout.strip()
+        json_start = stdout.find("{")
+        if json_start > 0:
+            # Ada prefix sebelum JSON — skip (kemungkinan warning text)
+            stdout = stdout[json_start:]
+        elif json_start == -1:
+            # Tidak ada JSON sama sekali
+            raise json.JSONDecodeError("No JSON found in output", stdout, 0)
+        result = json.loads(stdout)
     except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=500,
