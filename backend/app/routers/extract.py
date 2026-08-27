@@ -105,8 +105,11 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
     # ─── Cek cache dulu ───
     # Kalau file yang sama sudah pernah di-extract, return dari cache
     # supaya tidak perlu jalankan sidecar lagi (hemat 5-60 detik).
+    # TAPI: jangan return cache kalau result-nya empty (0 blocks) — kemungkinan
+    # hasil dari versi BE lama yang belum punya heuristic fallback.
+    # Bypass cache kalau empty, supaya selalu coba extract ulang.
     cached = get_cached(content)
-    if cached is not None:
+    if cached is not None and len(cached.get("blocks", [])) > 0:
         # Update filename (mungkin user upload nama beda tapi content sama)
         cached["filename"] = filename
         cached["cached"] = True

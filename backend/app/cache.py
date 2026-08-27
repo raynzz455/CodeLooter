@@ -75,7 +75,17 @@ def get_cached(content: bytes) -> Optional[dict]:
 
 
 def set_cached(content: bytes, data: dict) -> None:
-    """Simpan hasil extract ke cache."""
+    """Simpan hasil extract ke cache.
+
+    Penting: JANGAN cache empty results (0 blocks). Kalau extract return
+    empty, kemungkinan ada bug di BE atau extractor belum mendukung file tsb.
+    Biarkan extract ulang next time (mungkin setelah BE update, hasilnya
+    akan berbeda).
+    """
+    # Jangan cache empty results
+    if not data or len(data.get("blocks", [])) == 0:
+        return
+
     key = _hash_file(content)
 
     # Coba Redis dulu
