@@ -1,0 +1,26 @@
+# Dockerfile untuk Frontend Next.js (development dengan hot reload)
+# ─────────────────────────────────────────────────────────────
+# Pakai untuk docker compose dev lokal.
+# Untuk production, deploy ke Vercel (recommended) atau build image terpisah.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install deps
+RUN npm ci || npm install
+
+# Copy source (akan di-mount via volume untuk hot reload)
+COPY . .
+
+EXPOSE 3000
+
+# Dev mode dengan hot reload
+CMD ["npm", "run", "dev"]
+
+# Untuk production build (kalau tidak pakai Vercel):
+# RUN npm run build
+# CMD ["npm", "start"]

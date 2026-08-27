@@ -1,0 +1,84 @@
+# Docker Compose untuk CodeLooter local development
+# ─────────────────────────────────────────────────────────────
+# Menjalankan: FE (Next.js) + BE (FastAPI) + Redis (untuk caching future)
+#
+# Usage:
+#   1. Copy .env.local.example ke .env.local (FE)
+#   2. Copy backend/.env.example ke backend/.env (BE, isi dengan nilai asli)
+#   3. Jalankan: docker compose up
+#   4. Buka http://localhost:3000
+#
+# Catatan: Supabase tidak di-include di sini karena sudah managed.
+# Buat project Supabase terpisah di https://supabase.com.
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ─── Backend (FastAPI) ─────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codelooter-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Mount source code untuk hot reload
+      - ./backend:/app
+      # Tesseract training data persist
+      - tessdata:/usr/share/tesseract-ocr/4.00/tessdata
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - codelooter-net
+
+  # ─── Frontend (Next.js) ────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: codelooter-frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./.env.local
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://backend:8000/api
+      - NODE_ENV=development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - codelooter-net
+
+  # ─── Redis (untuk caching future — extract result, session, dll) ───
+  redis:
+    image: redis:7-alpine
+    container_name: codelooter-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - codelooter-net
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+networks:
+  codelooter-net:
+    driver: bridge
+
+volumes:
+  tessdata:
+  redis-data:
