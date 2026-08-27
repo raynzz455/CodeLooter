@@ -18,7 +18,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request
 from pydantic import BaseModel
 
 from ..language_detection import detect_language
-from ..llm_detection import detect_languages_llm
+from ..llm_extract import extract_from_pdf as llm_extract_pdf, extract_from_text as llm_extract_text
 from ..rate_limit import limiter
 from ..cache import get_cached, set_cached, get_cache_stats, clear_cache
 
@@ -118,27 +118,52 @@ async def extract_code(request: Request, file: UploadFile = File(...)):
 
     # Route ke extractor yang sesuai
     if ext in PDF_EXTS:
-        blocks = await extract_pdf(content, ext)
+        # PDF: extract text via PyMuPDF, lalu LLM untuk identifikasi code blocks
+        # Tulis ke temp file supaya PyMuPDF bisa baca
+        with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            raw_blocks = llm_extract_pdf(tmp_path)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        blocks = [
+            CodeBlock(
+                index=i,
+                lang=b.get("lang", "unknown"),
+                code=b["code"],
+                lines=b["lines"],
+                source="llm",
+            )
+            for i, b in enumerate(raw_blocks)
+        ]
     elif ext in MARKDOWN_EXTS:
-        blocks = extract_markdown(content.decode("utf-8", errors="replace"))
+        # MD: extract text, lalu LLM
+        raw_blocks = llm_extract_text(content.decode("utf-8", errors="replace"))
+        blocks = [
+            CodeBlock(index=i, lang=b.get("lang", "unknown"), code=b["code"],
+                      lines=b["lines"], source="llm")
+            for i, b in enumerate(raw_blocks)
+        ]
     elif ext in IPYNB_EXTS:
         blocks = extract_ipynb(content.decode("utf-8", errors="replace"))
     elif ext in HTML_EXTS:
         blocks = extract_html(content.decode("utf-8", errors="replace"))
     elif ext in PLAIN_TEXT_EXTS:
-        blocks = extract_plain_text(content.decode("utf-8", errors="replace"), ext)
+        # TXT/TEX: extract text, lalu LLM
+        raw_blocks = llm_extract_text(content.decode("utf-8", errors="replace"))
+        blocks = [
+            CodeBlock(index=i, lang=b.get("lang", "unknown"), code=b["code"],
+                      lines=b["lines"], source="llm")
+            for i, b in enumerate(raw_blocks)
+        ]
     elif ext in OFFICE_EXTS:
         blocks = extract_office(content, ext)
     else:
         raise HTTPException(status_code=400, detail=f"Format .{ext} tidak didukung")
-
-    # Deteksi bahasa untuk semua blocks SEKALIGUS via LLM (batch, 1 request)
-    # LLM jauh lebih akurat dari heuristic untuk R vs Python distinction
-    if blocks:
-        codes = [b.code for b in blocks]
-        langs = detect_languages_llm(codes)
-        for i, lang in enumerate(langs):
-            blocks[i].lang = lang or "unknown"
 
     response = ExtractResponse(
         blocks=blocks,
