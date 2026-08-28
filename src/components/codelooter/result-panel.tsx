@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { StatsBar } from "./stats-bar";
 import { StatsChart } from "./stats-chart";
 import { LoadingSkeleton } from "./loading-skeleton";
 import { ComparisonView } from "./comparison-view";
+import { SortableBlockList } from "./sortable-block-list";
 
 interface ResultPanelProps {
   result: ExtractResult | null;
@@ -23,8 +24,10 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedMd, setCopiedMd] = useState(false);
   const [zipping, setZipping] = useState(false);
   const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
+  const [reorderMode, setReorderMode] = useState(false);
 
   // File extension per language, mirroring the server-side extForLang helper.
   const extForLang = (lang: string): string =>
@@ -49,6 +52,7 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   useEffect(() => {
     setBlocks(null);
     setViewMode("extracted");
+    setReorderMode(false);
   }, [result]);
 
   // Sync local editable blocks whenever a new result arrives.
@@ -154,6 +158,13 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
     });
   };
 
+  // Reorder blocks via drag-and-drop. The new order is committed to local
+  // state and block indices are renumbered to match the new positions.
+  const handleReorder = (reordered: CodeBlock[]) => {
+    setBlocks(reordered.map((b, i) => ({ ...b, index: i })));
+    toast.info("Urutan blok diperbarui");
+  };
+
   const handleCopyAll = async () => {
     const body = effectiveBlocks.map((b) => b.code).join("\n\n");
     try {
@@ -161,6 +172,30 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
       setCopiedAll(true);
       setTimeout(() => setCopiedAll(false), 1500);
       toast.success(`${effectiveBlocks.length} blok disalin ke clipboard`);
+    } catch {
+      toast.error("Gagal menyalin");
+    }
+  };
+
+  // Copy all blocks to clipboard as Markdown fenced code blocks,
+  // each preceded by an HTML comment header with index / language / line count.
+  // Example output:
+  //   <!-- Block #0 | r | 5 lines -->
+  //   ```r
+  //   library(ggplot2)
+  //   ```
+  const handleCopyMarkdown = async () => {
+    const body = effectiveBlocks
+      .map(
+        (b) =>
+          `<!-- Block #${b.index} | ${b.lang} | ${b.lines} lines -->\n\`\`\`${b.lang}\n${b.code}\n\`\`\``,
+      )
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopiedMd(true);
+      setTimeout(() => setCopiedMd(false), 1500);
+      toast.success(`${effectiveBlocks.length} blok disalin sebagai Markdown`);
     } catch {
       toast.error("Gagal menyalin");
     }
@@ -225,6 +260,16 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
             </Button>
             <Button
               size="sm"
+              variant="ghost"
+              onClick={handleCopyMarkdown}
+              disabled={effectiveBlocks.length === 0}
+              title="Salin semua blok sebagai Markdown"
+            >
+              {copiedMd ? <Check className="h-4 w-4 text-emerald-600" /> : <ClipboardCopy className="h-4 w-4" />}
+              <span className="hidden sm:inline">Markdown</span>
+            </Button>
+            <Button
+              size="sm"
               variant="outline"
               onClick={handleDownloadAll}
               disabled={effectiveBlocks.length === 0}
@@ -253,6 +298,19 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
               >
                 <GitCompare className="h-4 w-4" />
                 <span className="hidden sm:inline">Bandingkan</span>
+              </Button>
+            )}
+            {/* Reorder toggle — only in extracted view */}
+            {viewMode === "extracted" && effectiveBlocks.length > 1 && (
+              <Button
+                size="sm"
+                variant={reorderMode ? "default" : "outline"}
+                onClick={() => setReorderMode((r) => !r)}
+                title={reorderMode ? "Selesai mengurutkan" : "Urutkan ulang blok (drag & drop)"}
+                className={reorderMode ? "bg-teal-600 hover:bg-teal-700" : ""}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="hidden sm:inline">{reorderMode ? "Selesai" : "Urutkan"}</span>
               </Button>
             )}
             <Button
@@ -295,6 +353,13 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
             File mungkin berbasis gambar (perlu OCR) atau tidak memiliki marker kode.
           </p>
         </div>
+      ) : reorderMode ? (
+        <SortableBlockList
+          blocks={effectiveBlocks}
+          onReorder={handleReorder}
+          onDownload={handleBlockDownload}
+          onChange={handleBlockChange}
+        />
       ) : (
         <AnimatePresence mode="popLayout">
           {effectiveBlocks.map((b) => (

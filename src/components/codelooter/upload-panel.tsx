@@ -5,6 +5,7 @@ import { UploadCloud, FileText, Loader2, Languages, ClipboardPaste, FileUp, X, F
 import { SUPPORTED_LANGS } from "@/lib/extractor/langdetect";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Presets } from "./presets";
 
 interface UploadPanelProps {
   onExtract: (file: File, lang: string) => Promise<void>;
@@ -213,6 +214,7 @@ export function UploadPanel({ onExtract, onBatchExtract, loading, disabled }: Up
       )}
 
       <div className="flex flex-col gap-2">
+        <Presets lang={lang} onSelect={setLang} />
         <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Languages className="h-3.5 w-3.5" />
           Bahasa kode

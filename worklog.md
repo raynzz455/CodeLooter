@@ -214,3 +214,124 @@ Stage Summary:
   3. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
   4. Add "copy as markdown" export (blocks as ``` fenced code blocks)
   5. Add extraction presets (R stats module, Python notebook, SQL scripts)
+
+---
+Task ID: 5-a
+Agent: full-stack-developer
+Task: Add copy-as-markdown export feature
+
+Work Log:
+- Read worklog.md (Tasks 1-4) and `src/components/codelooter/result-panel.tsx` to understand the existing UI patterns: `copiedAll` state, `handleCopyAll` clipboard pattern, and the file-header button group ordering (`Salin semua` → `Download` → `ZIP` → `Bandingkan` → `Simpan`).
+- Added `ClipboardCopy` to the `lucide-react` import list (kept `Check` for the success feedback).
+- Added `copiedMd` state alongside the existing `copiedAll` state.
+- Implemented `handleCopyMarkdown()`:
+  - Builds a Markdown string where each block is wrapped in a fenced code block with the block's language hint (```r ... ```).
+  - Prepends an HTML comment header before each block: `<!-- Block #0 | r | 5 lines -->`.
+  - Blocks separated by a blank line (`\n\n`).
+  - Copies via `navigator.clipboard.writeText()`.
+  - Sets `copiedMd=true` for 1.5s with `setTimeout` to show a checkmark, mirroring `copiedAll`.
+  - Toast on success: `N blok disalin sebagai Markdown`. Toast on failure: `Gagal menyalin`.
+- Added the new "Markdown" button in the file-header button group, immediately after the "Salin semua" button:
+  - `variant="ghost"` (matches the existing copy button style).
+  - `title="Salin semua blok sebagai Markdown"`.
+  - Icon: `ClipboardCopy` (or `Check` in emerald when copied).
+  - Label "Markdown" hidden on mobile via `hidden sm:inline` (icon always visible).
+  - `disabled` when `effectiveBlocks.length === 0`.
+- Verified: `bun run lint` passes cleanly. No other files touched.
+- Wrote work record to `/home/z/my-project/agent-ctx/5-a-full-stack-developer.md`.
+
+Stage Summary:
+- **Copy-as-Markdown export feature is complete and verified.** The ResultPanel file-header button group now offers a "Markdown" button right next to the existing "Salin semua" (plain-text copy) button. Clicking it copies all extracted code blocks to the clipboard as Markdown fenced code blocks with the per-block language hint, each preceded by an HTML comment header (`<!-- Block #N | lang | N lines -->`) and separated by a blank line — ready to paste into README files, documentation, or notes.
+- **Output format example**:
+  ```
+  <!-- Block #0 | r | 5 lines -->
+  ```r
+  library(ggplot2)
+  data <- read.csv("data.csv")
+  ```
+
+  <!-- Block #1 | python | 3 lines -->
+  ```python
+  import pandas as pd
+  ```
+  ```
+- **UX consistency**: same `variant="ghost"` styling as the plain-text copy button, same 1.5s emerald checkmark feedback pattern, same disabled-when-empty behaviour. Label "Markdown" hidden on mobile (icon always visible), matching the existing "Salin semua" responsive pattern.
+- **No blue/indigo colours** used; the success checkmark reuses the existing emerald accent.
+- **Only `src/components/codelooter/result-panel.tsx` was modified**, as instructed — no other files touched.
+- `bun run lint` passes cleanly.
+
+---
+Task ID: 5-b
+Agent: full-stack-developer
+Task: Add extraction presets (R/Python/SQL/Auto quick-select)
+
+Work Log:
+- Read worklog.md (Tasks 1-4) to understand prior work: Phase 1 extraction complete, batch extraction + ZIP export + before/after comparison view added. Extraction presets listed as a priority recommendation in Task 4.
+- Read existing `src/components/codelooter/upload-panel.tsx` to understand the `lang` state management and the "Bahasa kode" dropdown structure. Confirmed `lang` is a local `useState("auto")` bound to the `<select>` via `value`/`onChange`, and passed to `onExtract`/`onBatchExtract` calls.
+- Confirmed `framer-motion` (^12.23.2) is already in package.json.
+- **Created `src/components/codelooter/presets.tsx`**: New `Presets` component implementing the exact props interface `{ lang: string; onSelect: (lang: string) => void }`. Renders a horizontal row of 4 preset buttons (R Stats / Python / SQL / Auto) with lucide icons (`BarChart3`, `FileCode2`, `Database`, `Sparkles`), each with an Indonesian tooltip. Active preset (matching `lang`) highlighted with emerald palette; inactive presets use neutral `border-border bg-background text-muted-foreground hover:bg-accent`. framer-motion `motion.button` with `whileTap={{ scale: 0.95 }}` for subtle click animation. Buttons wrapped in `flex flex-wrap gap-2` for mobile wrapping. Added `aria-pressed` + `aria-label` for accessibility.
+- **Modified `src/components/codelooter/upload-panel.tsx`**: Added `import { Presets } from "./presets"`. Inserted `<Presets lang={lang} onSelect={setLang} />` directly above the "Bahasa kode" `<label>` inside the existing language-section `<div className="flex flex-col gap-2">`. The dropdown remains fully functional — clicking a preset calls `setLang(preset.value)`, which updates both the preset highlight AND the dropdown's selected value (both bound to the same `lang` state). User can fine-tune via the dropdown after a preset click.
+- **Verified**:
+  - `bun run lint` — passes cleanly (no errors)
+  - Dev server (Turbopack) compiles `/` route in ~10s, no compile errors
+  - `POST /api/extract?lang=r` and `POST /api/extract?lang=auto` both return 200 OK — confirms the lang value set by presets flows through to the API correctly
+- Wrote work record to `/home/z/my-project/agent-ctx/5-b-full-stack-developer.md`.
+
+Stage Summary:
+- **Extraction presets feature is complete and verified.** Users now see a horizontal row of 4 quick-select buttons (R Stats, Python, SQL, Auto) directly above the language dropdown in the UploadPanel. One click sets both the preset highlight and the underlying `lang` state, which is what gets sent to the extraction API. The native dropdown remains available for fine-tuning after a preset is chosen. The active preset is visually highlighted with an emerald background; inactive presets use a neutral muted style. framer-motion `whileTap={{ scale: 0.95 }}` gives subtle tactile feedback on click. Buttons wrap on mobile via `flex-wrap`.
+- **No blue/indigo colors** — emerald/teal palette only (consistent with the rest of CodeLooter's styling).
+- **Files**: 1 new (`presets.tsx`), 1 modified (`upload-panel.tsx`). No backend changes — presets only configure the `lang` query parameter that the existing `/api/extract` endpoint already accepts.
+- **Accessibility**: each preset button has `aria-pressed` (toggle state) and `aria-label` (the Indonesian tooltip text) for screen readers.
+
+---
+Task ID: 5
+Agent: webDevReview (cron round 4)
+Task: Drag-and-drop reordering + copy-as-markdown + extraction presets.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-4) — Phase 1 extraction complete, ZIP export + comparison view added in Task 4.
+- Performed QA: server stable, lint passes, 9/9 extraction checks pass, all API endpoints work. No new bugs found.
+- Focused this round on 3 new features from the Task 4 priority recommendations:
+
+**Feature 1: Copy as Markdown Export (Task 5-a, via subagent)**
+- Added "Markdown" button to ResultPanel header (next to "Salin semua" button).
+- On click: builds a Markdown string where each block is wrapped in a fenced code block with the language hint (```` ```r ... ``` ````), preceded by an HTML comment header (`<!-- Block #0 | r | 5 lines -->`).
+- Copies to clipboard via `navigator.clipboard.writeText()`, shows checkmark for 1.5s, toast notification.
+- New `copiedMd` state for copy feedback.
+
+**Feature 2: Extraction Presets (Task 5-b, via subagent)**
+- Created `src/components/codelooter/presets.tsx`: 4 quick-select preset buttons (R Stats, Python, SQL, Auto) with icons (BarChart3, FileCode2, Database, Sparkles).
+- Active preset highlighted with emerald background. Framer-motion `whileTap={{ scale: 0.95 }}` click animation.
+- `aria-pressed` + `aria-label` for screen reader accessibility.
+- Integrated into UploadPanel: placed above the language dropdown. Clicking a preset sets the `lang` state (and the dropdown reflects the change). Both presets and dropdown are bound to the same `lang` state.
+
+**Feature 3: Block Drag-and-Drop Reordering (implemented directly)**
+- Created `src/components/codelooter/sortable-block-list.tsx`: Uses `@dnd-kit/core` + `@dnd-kit/sortable` (already installed).
+- Each block gets a drag handle (GripVertical icon) on the left. Dragging reorders blocks via `arrayMove`.
+- `PointerSensor` (5px activation distance) + `KeyboardSensor` for accessibility.
+- `SortableContext` with `verticalListSortingStrategy`.
+- Dragging opacity 0.5, smooth CSS transform transitions.
+- Added "Urutkan" toggle button to ResultPanel header (teal when active). Only shows when >1 block and in extracted view.
+- `handleReorder` commits the new order to local state and renumbers block indices.
+- Info banner in teal explains the drag mode when active.
+- Reorder mode resets on new extraction result.
+
+- Verified all endpoints and features:
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - Batch API: 2 files → 2 results ✓
+  - removedLines: 8 lines from PDF ✓
+  - Browser: page loads with preset buttons visible, no console errors ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports drag-and-drop block reordering, copy-as-markdown export, and one-click extraction presets (R/Python/SQL/Auto). All API endpoints work correctly. Lint passes cleanly.
+- **Completed modifications**: 3 new features (drag-and-drop reordering + copy-as-markdown + presets), 2 new components (sortable-block-list.tsx, presets.tsx), result-panel extended with reorder mode + markdown button. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit). All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): inline snippet editor, OCR progress indicator
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add "extraction history" — track all extractions in current session for quick re-access
+  4. Add block merge/split operations (manually merge two blocks or split one)
+  5. Add export to HTML (syntax-highlighted HTML file with all blocks)
