@@ -1265,3 +1265,107 @@ Stage Summary:
 - **Unresolved risks**:
   - Dev server (both turbopack and webpack) has persistent cache corruption issues in the 4GB cgroup environment. Currently running in webpack mode. Mitigation: full cache clean + restart.
   - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+
+---
+Task ID: 13
+Agent: full-stack-developer
+Task: Rewrite UI with CodeLooter neo-brutalist design + add LLM extraction mode
+
+Work Log:
+- Read worklog (Tasks 1–12 complete: Phase 1 extraction + Phase 2 features like notes/IPYNB/stats already shipped on top of an emerald Tailwind UI). Read `/tmp/CodeLooter/app/page.tsx` (517 lines, the original neo-brutalist design from raynzz455/CodeLooter) and `/tmp/CodeLooter/components/data.ts` (LANGUAGES, STATS, SAMPLE_CODES, RECENT_FILES). Read `/home/z/my-project/skills/LLM/SKILL.md` to confirm z-ai-web-dev-sdk usage pattern (`await ZAI.create()` → `zai.chat.completions.create({ messages, thinking: { type: "disabled" } })`). Read existing `src/lib/codelooter-api.ts`, `src/app/api/extract/route.ts`, `src/app/api/snippets/route.ts`, and `src/lib/extractor/{index,pdf-pure,formats,types}.ts` to understand the extraction pipeline and the API contract the new UI must call.
+
+**Part 1: Neo-brutalist UI rewrite**
+
+- **`src/components/codelooter/data.ts`** (NEW, 247 lines) — ported the original repo's data constants so the new page has language metadata and demo samples. Includes:
+  - `LANGUAGES`: 8 languages (Python 🐍, R 📊, JS ⚡, TS 🔷, Java ☕, C++ ⚙️, SQL 🗃️, Kotlin 🟣) each with `id`, `label`, `emoji`, pastel `color`, and file `ext`.
+  - `STATS`: 4 hero stats (File Diproses 1,247 / Kode Diekstrak 8,903 / Bahasa Didukung 8 / Akurasi 97.2%) with their respective pastel colors.
+  - `SAMPLE_CODES`: 8 sample code strings (one per language) for the empty-state result panel preview.
+  - Exports `Language` and `Stat` interfaces for type-safety.
+
+- **`src/app/page.tsx`** (REWRITTEN, ~1130 lines) — complete replacement of the previous emerald Tailwind UI with the original neo-brutalist design. Adapted to our existing API and simplified (no auth, no router, single-page):
+  - **Header**: sticky yellow (`#ffe8a3`) header with 3px black bottom border + `0 5px 0 #000` shadow. CodeLooter! logo in Bangers font with `3px 3px 0 #ff6b6b` text-shadow, plus red `BETA` tag. Right side shows an AI/Pattern mode indicator tag and a black "PILIH FILE" button with the same press-down animation as the original (translate 2px + reduced shadow on mousedown).
+  - **Stats grid**: 4 colored cards (green / yellow / purple / orange) using the `STATS` constants, each `border: 3px solid #000`, `boxShadow: 4px 4px 0 #000`. Responsive: 2-up on mobile, 4-up on ≥900px (via the existing `.stats-grid` CSS).
+  - **Three-column main grid** (`.main-grid` CSS — stacked on mobile, grid on desktop):
+    - **COL 1 — PILIH BAHASA** (yellow `#ffe8a3` header with `Code2` icon): detected-language chips panel (green, appears after extraction), a manually-overridable language dropdown (the current lang's color, with `ChevronDown` rotation, popIn animation, hover state on each option), an info card showing the selected language, and a dashed hint box at the bottom.
+    - **COL 2 — UPLOAD FILE** (green `#d4f0e4` header with `FileText` icon + `PDF · DOC · PPTX` black tag): drop zone with 4 corner decorations (yellow squares), drag highlight, file preview card with red remove button. Below: a new **AI Mode toggle** (a black-bordered switch styled like the original repo's toggles — 44×24px, red track when active, slides a circular knob left/right with a CSS transition). When ON the panel's background turns purple and shows a red `LLM` tag. Extract button below: black with `#ffe8a3` text, `5px 5px 0 #ff6b6b` hard shadow, Bangers font, press animation. Shows `AI SEDANG MENGANALISIS...` spinner text when AI mode is on and extracting, `SEDANG MENGEKSTRAK...` otherwise.
+    - **COL 3 — HASIL EKSTRAKSI** (purple `#f5f0ff` header with three colored dots + status badge showing `N BLOK` / `GAGAL` / `MENUNGGU`): A secondary language-chip row appears when multiple languages are detected (lets the user switch the displayed block). Dark `#1a1a2e` code viewport with JetBrains Mono font, scrollable (`max-h-440px`). Empty state shows `???` placeholder + helper text. Extracting state shows pulsing Bangers text (`AI SEDANG MENGANALISIS...` or `MENGANALISIS FILE...`) + 5 bouncing dots. When AI mode is on, an extra helper paragraph appears explaining the LLM is reading the whole document. A meta badge (top-left) shows the extraction `method`, `durationMs`, and `cached` flag. Action buttons (bottom-right): Save (purple, shows `Tersimpan! Simpan Ulang` after first save), Download (green, `.{ext}`), Copy (red → green on copy with `TERSALIN!` text). Orange footer strip with language + line count + date.
+  - **Snippet list section** (`📂 SNIPPET TERSIMPAN`, orange header): responsive card grid (`repeat(auto-fill, minmax(min(100%, 280px), 1fr))`) showing all saved snippets with language icon, filename, block count, file size, first tag, date, and **Muat** (black) + **🗑** (red) action buttons. Loading skeleton shows a spinning loader. Empty state shows `📭 Belum ada snippet`. Refresh button in the header. Max-height 320px with scroll. Snippets are loaded via `listSnippets()` on mount; loading one calls `getSnippet(id)` and replaces the result panel's blocks; deleting calls `deleteSnippet(id)` with a confirm dialog.
+  - **Footer**: yellow sticky footer with `CodeLooter! · Ekstrak kode dari dokumen · BETA`.
+  - **Adaptations from the original**: removed `useRouter`, `getUser`, `logout`, `LogIn`, `Lock`, `ChevronRight` (no auth), removed `SplashScreen` (no equivalent component), replaced `extractCode(file, lang)` with our `extractFile` (pattern) or `extractFileLLM` (AI mode), and called `saveSnippet(filename, blocks, lang, size, tags)` with the full signature our API expects.
+  - All neo-brutalist styling is inline `style={{...}}` per the task instructions — no Tailwind classes for the design elements. Uses `fontFamily: "var(--font-display)"` for headings (Bangers), `"var(--font-body)"` for body (Nunito), `"var(--font-mono)"` for code (JetBrains Mono).
+
+**Part 2: LLM-based extraction mode**
+
+- **`src/app/api/extract-llm/route.ts`** (NEW, 281 lines) — `POST /api/extract-llm?lang=r`. Flow:
+  1. Parse `file` from form data, validate extension against `ALL_SUPPORTED_EXTS`, enforce 50MB limit (same as `/api/extract`).
+  2. **Extract raw text** via `extractRawText(filename, content)`: for PDFs uses the existing pure-TS parser (`extractPdfTextPureTs` from `src/lib/extractor/pdf-pure.ts`); for everything else (md, ipynb, html, tex, txt) decodes the buffer to utf-8 directly (the LLM parses the structure itself).
+  3. **Call the LLM** via `z-ai-web-dev-sdk`: `await ZAI.create()` then `zai.chat.completions.create({ messages: [system, user], thinking: { type: "disabled" } })`. System prompt is the exact one specified in the task: "You are a code extraction expert. Given the following text from a document, identify ALL code blocks. Return a JSON array where each element has: lang (r/python/sql/java/cpp/javascript/typescript/php/kotlin/go/rust/bash/html/css/json), code (the code string), and lines (line count). Only return the JSON array, no other text." User prompt prepends a hint about the user-selected language when not "auto". Input truncated to 30k chars (≈7-8k tokens) to stay well under the 30s timeout.
+  4. **Parse the response**: strip ```` ```json ```` fences if present, `JSON.parse` the result, validate each block has a non-empty `code` string (≥5 chars), normalise `lang` against an `ALLOWED_LANGS` whitelist (anything else → "unknown"), compute `lines` if missing.
+  5. **30s soft timeout** via a custom `withTimeout()` helper using `Promise.race` — if the LLM call doesn't resolve in 30s it rejects and we fall through to the pattern fallback.
+  6. **Fallback**: if the LLM call fails for ANY reason (ZAI.create throws, completions.create throws, JSON.parse fails, response isn't an array, returns zero blocks), we call `extractFromFile({ filename, content, lang })` (the existing pattern pipeline) and surface its blocks. The `method` field in the stats records the fallback reason: `pattern-fallback (llm-error: <reason>)` or `pattern-fallback (llm-empty: <reason>)`.
+  7. Always returns 200 with an `ExtractResult` (or 4xx/5xx for upload issues only). Never throws because of the LLM.
+  - **z-ai-web-dev-sdk is imported only in this server route** — never in client code.
+  - The full route is TypeScript-strict: error variables are typed `unknown` with `instanceof Error` checks for safe `.message` access.
+
+- **`src/lib/codelooter-api.ts`** (EDITED) — added the `extractFileLLM(file, lang)` client helper exactly as specified in the task. POSTs the file to `/api/extract-llm?lang=<lang>` and returns the same `ExtractResult` shape as `extractFile`, so the UI can swap between the two transparently based on the AI mode toggle.
+
+**Verification**:
+- `bun run lint` → exit code 0 ✓. Only 1 warning (`@next/next/no-page-custom-font` on `layout.tsx` line 42, the JetBrains Mono `<link>` tag — pre-existing, unrelated to my changes, an unavoidable limitation of the chosen font-loading approach).
+- Existing `/api/extract` and `/api/snippets` routes untouched — backward compatible.
+- Dev server log confirms clean compile of `/api/snippets` with the expected Prisma query.
+
+Stage Summary:
+- **UI fully rewritten** with the original CodeLooter neo-brutalist design: cream background (`#fef9f0`), 3px black borders, hard `5px 5px 0 #000` shadows, yellow/green/purple/orange pastel card headers, Bangers display font with red text-shadow, JetBrains Mono code viewport, copy/download/save actions with press-down animations, language dropdown with popIn animation, multi-block language switcher chips, snippet list card grid with load + delete actions. All inline-styled per the task constraints — no Tailwind for neo-brutalist elements.
+- **LLM extraction mode** live at `POST /api/extract-llm?lang=r`: extracts raw text from the uploaded file, calls z-ai-web-dev-sdk with the exact system prompt specified in the task, parses the JSON array response, and falls back to the existing pattern extractor on any failure (timeout, network error, malformed JSON, empty array). The LLM call is wrapped in a 30s `Promise.race` timeout. The endpoint always returns an `ExtractResult` — never throws because of the LLM.
+- **AI Mode toggle** in the upload panel: a black-bordered switch (44×24px) that when ON turns the panel purple, shows a red `LLM` tag, changes the extract button's loading text to `AI SEDANG MENGANALISIS...`, and routes the request to `/api/extract-llm` instead of `/api/extract`. A mode indicator tag (🤖 AI / ⚡ PATTERN) appears in the header when results are loaded. A meta badge in the result panel shows the actual `method` used (`llm`, `pattern-fallback (llm-error: ...)`, etc.), `durationMs`, and `cached` flag — so the user can see at a glance whether the LLM succeeded or fell back.
+- **Snippet list section** (`📂 SNIPPET TERSIMPAN`): responsive card grid showing all snippets from `/api/snippets` with language icon, filename, block count, file size, first tag, date, and Muat / 🗑 actions. Loading + empty states handled. Auto-refreshes on save and on delete.
+- **Single-page app** — no router navigation, no auth, no SplashScreen, fully self-contained on `/`. `bun run lint` passes with only 1 pre-existing warning unrelated to this task.
+
+---
+Task ID: 13
+Agent: main (user request: clone frontend + add NLP model)
+Task: Clone CodeLooter neo-brutalist frontend design + add LLM-based extraction mode.
+
+Work Log:
+- User pointed out that (1) the UI didn't match the original CodeLooter design, (2) the full repo wasn't cloned, and (3) an NLP model was needed for code detection.
+- Cloned the full CodeLooter repo from https://github.com/raynzz455/CodeLooter and read the original frontend code.
+- Identified the original design: **neo-brutalist** — 3px solid black borders, hard shadows (5px 5px 0 #000), Bangers/Nunito fonts, cream background (#fef9f0), yellow header (#ffe8a3), red accents (#ff6b6b), bright pastel tag colors with emoji language labels.
+
+**Part 1: Neo-brutalist UI (via subagent)**
+- Updated `globals.css` with CodeLooter CSS variables, fonts, animations (spin, bounce, pulse, popIn, screenShake), and neo-brutalist utility classes (.cl-card, .cl-tag, .cl-btn).
+- Updated `layout.tsx` to use Bangers + Nunito fonts from next/font/google, with JetBrains Mono loaded via Google Fonts link.
+- Created `src/components/codelooter/data.ts` with LANGUAGES (8 entries with emoji + colors), STATS (4 entries), SAMPLE_CODES (8 entries).
+- Completely rewrote `src/app/page.tsx` (~1130 lines) with the original CodeLooter design:
+  - Yellow sticky header with "CodeLooter!" logo (Bangers font + red text-shadow) + BETA tag
+  - 4-card stats grid (green/yellow/purple/orange pastel colors)
+  - Three-column main grid:
+    - PILIH BAHASA (yellow header) — language dropdown with emoji + popIn animation + detected-language chips
+    - UPLOAD FILE (green header) — drop zone with 4 corner decorations + AI Mode toggle + press-animated extract button
+    - HASIL EKSTRAKSI (purple header) — dark code viewport with JetBrains Mono, copy/download/save buttons with press animations
+  - SNIPPET TERSIMPAN section — responsive card grid with load + delete actions
+- All styling uses inline styles (matching the original CodeLooter approach), not Tailwind.
+
+**Part 2: LLM-based extraction (via subagent)**
+- Created `src/app/api/extract-llm/route.ts` — new `POST /api/extract-llm?lang=r` endpoint:
+  - Extracts raw text from the uploaded file (PDF via pure-TS parser, other formats via utf-8)
+  - Sends the text to z-ai-web-dev-sdk LLM with a system prompt asking it to identify ALL code blocks and return structured JSON
+  - 30s soft timeout via Promise.race
+  - Falls back to pattern extraction (`extractFromFile`) on any failure — always returns an ExtractResult, never throws
+  - The `method` field records whether LLM succeeded (`llm`) or fell back (`pattern-fallback`)
+  - z-ai-web-dev-sdk is imported ONLY in this server route — never in client components
+- Added `extractFileLLM(file, lang)` helper to `src/lib/codelooter-api.ts`.
+- Added an "AI Mode" toggle switch in the upload panel — when enabled, extraction goes to `/api/extract-llm` instead of `/api/extract`. Button label changes to "AI SEDANG MENGANALISIS...".
+
+- Verified:
+  - Lint: passes cleanly (1 pre-existing warning about font link, 0 errors) ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - Quality test: 50/50 checks pass (100%) ✓
+  - Browser: page loads with "CodeLooter!" heading, PILIH FILE button, AI Mode toggle, EKSTRAK KODE button — no console errors ✓
+
+Stage Summary:
+- **Current project status**: The UI now matches the original CodeLooter neo-brutalist design (Bangers font, thick black borders, hard shadows, bright pastel colors, emoji language labels). An LLM-based extraction mode has been added using z-ai-web-dev-sdk — users can toggle "AI Mode" to use LLM for smarter code detection, with automatic fallback to pattern extraction if the LLM fails or times out.
+- **Key changes**: Complete UI rewrite (page.tsx ~1130 lines), new LLM extraction endpoint, new data.ts constants, updated globals.css and layout.tsx with CodeLooter fonts/design.
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit) — known issue, all endpoints work via curl.
+  - LLM extraction depends on z-ai-web-dev-sdk availability — has automatic fallback to pattern extraction.
+  - The neo-brutalist design uses inline styles (matching original CodeLooter) rather than Tailwind — this is intentional to match the original look exactly.

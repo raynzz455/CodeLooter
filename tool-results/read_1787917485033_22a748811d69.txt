@@ -1,0 +1,518 @@
+     1→"use client";
+     2→
+     3→import { useState, useCallback, useEffect, useRef } from "react";
+     4→import { useRouter } from "next/navigation";
+     5→import { ChevronDown, LogIn, FileText, Lock, ChevronRight, Code2, Upload, X, Zap, Copy, Check, Save, FolderOpen } from "lucide-react";
+     6→import { SplashScreen, useShouldShowSplash } from "@/components/SplashScreen";
+     7→import { LANGUAGES, STATS, SAMPLE_CODES } from "@/components/data";
+     8→import { extractCode, saveSnippet, getUser, logout, type User } from "@/lib/api";
+     9→import type { CodeBlock } from "@/types";
+    10→
+    11→const ACCEPTED_EXT = /\.(pdf|doc|docx|pptx?|xlsx?|txt|md|html|ipynb|tex)$/i;
+    12→
+    13→function Tag({ bg = "#ffe8a3", color = "#000", children }: { bg?: string; color?: string; children: React.ReactNode }) {
+    14→  return (
+    15→    <span style={{ backgroundColor: bg, color, border: "2px solid #000", borderRadius: "6px", padding: "2px 9px", fontSize: "0.68rem", fontWeight: 900, whiteSpace: "nowrap", fontFamily: "var(--font-body)" }}>
+    16→      {children}
+    17→    </span>
+    18→  );
+    19→}
+    20→
+    21→function Card({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+    22→  return (
+    23→    <div style={{ backgroundColor: "#fff", border: "3px solid #000", borderRadius: "16px", boxShadow: "5px 5px 0 #000", overflow: "hidden", display: "flex", flexDirection: "column", ...style }}>
+    24→      {children}
+    25→    </div>
+    26→  );
+    27→}
+    28→
+    29→function CardHeader({ bg, children }: { bg: string; children: React.ReactNode }) {
+    30→  return (
+    31→    <div style={{ backgroundColor: bg, borderBottom: "3px solid #000", padding: "11px 16px", display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+    32→      {children}
+    33→    </div>
+    34→  );
+    35→}
+    36→
+    37→export default function Home() {
+    38→  const router = useRouter();
+    39→  const shouldShowSplash                  = useShouldShowSplash();
+    40→  const [splashDone, setSplashDone]       = useState(false);
+    41→  const [profileOpen, setProfileOpen]     = useState(false);
+    42→  const [user, setUser]                   = useState<User | null>(null);
+    43→  const [selectedLang, setSelectedLang]   = useState("r");
+    44→  const [dropdownOpen, setDropdownOpen]   = useState(false);
+    45→  const [uploadedFile, setUploadedFile]   = useState<File | null>(null);
+    46→  const [isDragging, setIsDragging]       = useState(false);
+    47→  const [isExtracting, setIsExtracting]   = useState(false);
+    48→  const [extractedBlocks, setExtractedBlocks] = useState<CodeBlock[]>([]);
+    49→  const [extractError, setExtractError]   = useState<string | null>(null);
+    50→  const [copied, setCopied]               = useState(false);
+    51→  const [savedSnippetId, setSavedSnippetId] = useState<string | null>(null);
+    52→  const [saving, setSaving]               = useState(false);
+    53→
+    54→  const fileInputRef = useRef<HTMLInputElement>(null);
+    55→  const profileRef   = useRef<HTMLDivElement>(null);
+    56→
+    57→  const extracted = extractedBlocks.length > 0;
+    58→  const currentLang = LANGUAGES.find((l) => l.id === selectedLang) ?? LANGUAGES[0];
+    59→
+    60→  // active block for preview
+    61→  const activeBlock = extractedBlocks.find((b) => b.lang === selectedLang) ?? extractedBlocks[0] ?? null;
+    62→  const displayCode = activeBlock?.code ?? SAMPLE_CODES[selectedLang] ?? "";
+    63→
+    64→  // Init user from cookie on mount
+    65→  useEffect(() => {
+    66→    setUser(getUser());
+    67→  }, []);
+    68→
+    69→  const handleLogout = () => {
+    70→    logout();
+    71→    setUser(null);
+    72→    setProfileOpen(false);
+    73→  };
+    74→
+    75→  // close profile on outside click
+    76→  useEffect(() => {
+    77→    const handler = (e: MouseEvent) => {
+    78→      if (profileRef.current && !profileRef.current.contains(e.target as Node))
+    79→        setProfileOpen(false);
+    80→    };
+    81→    document.addEventListener("mousedown", handler);
+    82→    return () => document.removeEventListener("mousedown", handler);
+    83→  }, []);
+    84→
+    85→  const setFile = (file: File | null) => {
+    86→    setUploadedFile(file);
+    87→    setExtractedBlocks([]);
+    88→    setExtractError(null);
+    89→  };
+    90→
+    91→  const handleDrop = useCallback((e: React.DragEvent) => {
+    92→    e.preventDefault();
+    93→    setIsDragging(false);
+    94→    const file = e.dataTransfer.files[0];
+    95→    if (file && ACCEPTED_EXT.test(file.name)) setFile(file);
+    96→  }, []);
+    97→
+    98→  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    99→    const file = e.target.files?.[0];
+   100→    if (file) setFile(file);
+   101→  };
+   102→
+   103→  const handleExtract = async () => {
+   104→    if (!uploadedFile) return;
+   105→    setIsExtracting(true);
+   106→    setExtractError(null);
+   107→    setExtractedBlocks([]);
+   108→    setSavedSnippetId(null);
+   109→
+   110→    try {
+   111→      const data = await extractCode(uploadedFile, selectedLang);
+   112→      const blocks: CodeBlock[] = data.blocks ?? [];
+   113→      setExtractedBlocks(blocks);
+   114→      if (blocks.length > 0) {
+   115→        const firstKnown = blocks.find((b) => b.lang !== "unknown");
+   116→        setSelectedLang(firstKnown?.lang ?? blocks[0].lang);
+   117→      }
+   118→    } catch (err) {
+   119→      setExtractError(err instanceof Error ? err.message : "Koneksi gagal — coba lagi");
+   120→    } finally {
+   121→      setIsExtracting(false);
+   122→    }
+   123→  };
+   124→
+   125→  const handleSave = async () => {
+   126→    if (!uploadedFile || extractedBlocks.length === 0) return;
+   127→    if (!user) {
+   128→      // User belum login → arahkan ke /auth
+   129→      router.push("/auth");
+   130→      return;
+   131→    }
+   132→    setSaving(true);
+   133→    try {
+   134→      const snippet = await saveSnippet(uploadedFile.name, extractedBlocks);
+   135→      setSavedSnippetId(snippet.id);
+   136→    } catch (err) {
+   137→      alert(err instanceof Error ? err.message : "Gagal menyimpan snippet");
+   138→    } finally {
+   139→      setSaving(false);
+   140→    }
+   141→  };
+   142→
+   143→  const handleCopy = async () => {
+   144→    await navigator.clipboard.writeText(displayCode);
+   145→    setCopied(true);
+   146→    setTimeout(() => setCopied(false), 2000);
+   147→  };
+   148→
+   149→  const handleDownload = () => {
+   150→    if (!activeBlock) return;
+   151→    const blob = new Blob([activeBlock.code], { type: "text/plain;charset=utf-8" });
+   152→    const url = URL.createObjectURL(blob);
+   153→    const a = document.createElement("a");
+   154→    a.href = url;
+   155→    a.download = `codelooter_${activeBlock.lang}.${currentLang?.ext ?? "txt"}`;
+   156→    a.click();
+   157→    URL.revokeObjectURL(url);
+   158→  };
+   159→
+   160→  // lang tabs from extracted blocks
+   161→  const detectedLangs = [...new Set(extractedBlocks.map((b) => b.lang))];
+   162→
+   163→  return (
+   164→    <>
+   165→      {/* SPLASH */}
+   166→      {shouldShowSplash && !splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
+   167→
+   168→      <div style={{ backgroundColor: "#fef9f0", fontFamily: "var(--font-body)", minHeight: "100vh" }}>
+   169→
+   170→        {/* ══ HEADER ══ */}
+   171→        <header style={{ backgroundColor: "#ffe8a3", borderBottom: "3px solid #000", boxShadow: "0 5px 0 #000", position: "sticky", top: 0, zIndex: 50, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+   172→          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+   173→            <div style={{ width: 40, height: 40, border: "3px solid #000", borderRadius: "10px", overflow: "hidden", boxShadow: "3px 3px 0 #ff6b6b", flexShrink: 0 }}>
+   174→              {/* eslint-disable-next-line @next/next/no-img-element */}
+   175→              <img src="/logo.jpg" alt="CodeLooter logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+   176→            </div>
+   177→            <h1 style={{ fontFamily: "var(--font-display)", fontSize: "clamp(1.5rem,5vw,2.1rem)", letterSpacing: "0.05em", lineHeight: 1, textShadow: "3px 3px 0 #ff6b6b", whiteSpace: "nowrap", margin: 0 }}>
+   178→              CodeLooter!
+   179→            </h1>
+   180→            <div style={{ backgroundColor: "#ff6b6b", border: "2px solid #000", borderRadius: "6px", padding: "1px 7px", fontFamily: "var(--font-display)", fontSize: "0.78rem", color: "#fff", boxShadow: "2px 2px 0 #000", flexShrink: 0 }}>
+   181→              BETA
+   182→            </div>
+   183→          </div>
+   184→
+   185→          {/* profile */}
+   186→          <div ref={profileRef} style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+   187→            {user && (
+   188→              <button onClick={() => router.push("/dashboard")}
+   189→                style={{ backgroundColor: "#d4f0e4", border: "2px solid #000", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 900, fontSize: "0.82rem", boxShadow: "2px 2px 0 #000", display: "flex", alignItems: "center", gap: "6px" }}>
+   190→                <FolderOpen size={14} /> <span className="profile-name">Snippet Saya</span>
+   191→              </button>
+   192→            )}
+   193→            {user ? (
+   194→              <button onClick={() => setProfileOpen(!profileOpen)} style={{ backgroundColor: "#f5f0ff", border: "3px solid #000", borderRadius: "10px", padding: "5px 12px", boxShadow: "3px 3px 0 #000", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+   195→                <div style={{ backgroundColor: "#ff6b6b", border: "2px solid #000", borderRadius: "50%", width: 30, height: 30, overflow: "hidden", flexShrink: 0 }}>
+   196→                  {/* eslint-disable-next-line @next/next/no-img-element */}
+   197→                  <img src="/logo.jpg" alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+   198→                </div>
+   199→                <span className="profile-name" style={{ fontWeight: 900, fontSize: "0.82rem", fontFamily: "var(--font-body)" }}>{user.name || user.email}</span>
+   200→                <ChevronDown size={14} style={{ transform: profileOpen ? "rotate(180deg)" : "", transition: "transform 0.2s" }} />
+   201→              </button>
+   202→            ) : (
+   203→              <button onClick={() => router.push("/auth")} style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "8px 16px", fontFamily: "var(--font-display)", fontSize: "1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "flex", alignItems: "center", gap: "6px", transition: "transform 0.1s, box-shadow 0.1s" }}
+   204→                onMouseDown={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #ff6b6b"; }}
+   205→                onMouseUp={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "4px 4px 0 #ff6b6b"; }}
+   206→              >
+   207→                <LogIn size={15} /> MASUK
+   208→              </button>
+   209→            )}
+   210→
+   211→            {/* profile dropdown */}
+   212→            {profileOpen && user && (
+   213→              <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, backgroundColor: "#fff", border: "3px solid #000", borderRadius: "12px", boxShadow: "5px 5px 0 #000", minWidth: "190px", zIndex: 60, overflow: "hidden", animation: "popIn 0.2s cubic-bezier(0.34,1.56,0.64,1)" }}>
+   214→                <div style={{ backgroundColor: "#f5f0ff", borderBottom: "3px solid #000", padding: "12px 14px" }}>
+   215→                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+   216→                    <div style={{ width: 34, height: 34, border: "2px solid #000", borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}>
+   217→                      {/* eslint-disable-next-line @next/next/no-img-element */}
+   218→                      <img src="/logo.jpg" alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+   219→                    </div>
+   220→                    <div style={{ minWidth: 0 }}>
+   221→                      <p style={{ fontWeight: 900, fontSize: "0.85rem", lineHeight: 1.2, margin: 0, fontFamily: "var(--font-body)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name || user.email}</p>
+   222→                      <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "#666", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</p>
+   223→                    </div>
+   224→                  </div>
+   225→                </div>
+   226→                <button onClick={() => router.push("/dashboard")} style={{ width: "100%", padding: "11px 14px", backgroundColor: "#fff", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.88rem", transition: "background-color 0.1s" }}
+   227→                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fef9f0"; }}
+   228→                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff"; }}
+   229→                >
+   230→                  <FolderOpen size={15} /> Dashboard Saya
+   231→                </button>
+   232→                <button onClick={handleLogout} style={{ width: "100%", padding: "11px 14px", backgroundColor: "#fff", border: "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "0.88rem", color: "#cc2222", transition: "background-color 0.1s" }}
+   233→                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff0f0"; }}
+   234→                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#fff"; }}
+   235→                >
+   236→                  <LogIn size={15} style={{ transform: "rotate(180deg)" }} /> Keluar
+   237→                </button>
+   238→              </div>
+   239→            )}
+   240→          </div>
+   241→        </header>
+   242→
+   243→        {/* ══ MAIN ══ */}
+   244→        <main style={{ padding: "16px", maxWidth: "1400px", margin: "0 auto" }}>
+   245→
+   246→          {/* STATS */}
+   247→          <div className="stats-grid">
+   248→            {STATS.map((s) => (
+   249→              <div key={s.label} style={{ backgroundColor: s.color, border: "3px solid #000", borderRadius: "10px", padding: "10px 14px", boxShadow: "4px 4px 0 #000" }}>
+   250→                <p style={{ fontSize: "clamp(1.2rem,4vw,1.6rem)", fontFamily: "var(--font-display)", letterSpacing: "0.04em", lineHeight: 1, margin: 0 }}>{s.val}</p>
+   251→                <p style={{ fontSize: "0.7rem", fontWeight: 800, color: "#333", marginTop: "2px", marginBottom: 0, fontFamily: "var(--font-body)" }}>{s.label}</p>
+   252→              </div>
+   253→            ))}
+   254→          </div>
+   255→
+   256→          {/* THREE COLUMNS */}
+   257→          <div className="main-grid">
+   258→
+   259→            {/* COL 1: PILIH BAHASA */}
+   260→            <Card>
+   261→              <CardHeader bg="#ffe8a3">
+   262→                <Code2 size={15} />
+   263→                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em" }}>PILIH BAHASA</span>
+   264→              </CardHeader>
+   265→              <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "10px", flex: 1, overflow: "hidden" }}>
+   266→                {/* detected langs after extraction */}
+   267→                {detectedLangs.length > 0 && (
+   268→                  <div style={{ backgroundColor: "#d4f0e4", border: "2px solid #000", borderRadius: "10px", padding: "10px 12px" }}>
+   269→                    <p style={{ fontSize: "0.65rem", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "7px", marginTop: 0 }}>🔍 Terdeteksi</p>
+   270→                    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+   271→                      {detectedLangs.map((id) => {
+   272→                        const lang = LANGUAGES.find((l) => l.id === id);
+   273→                        const isActive = id === selectedLang;
+   274→                        return (
+   275→                          <button key={id} onClick={() => setSelectedLang(id)} style={{ backgroundColor: isActive ? (lang?.color ?? "#ffe8a3") : "#fff", border: "2px solid #000", borderRadius: "8px", padding: "4px 10px", fontSize: "0.75rem", fontWeight: 900, cursor: "pointer", boxShadow: isActive ? "2px 2px 0 #000" : "none", transform: isActive ? "translate(1px,1px)" : "", fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: "4px", transition: "all 0.1s" }}>
+   276→                            <span>{lang?.emoji ?? "📄"}</span>{lang?.label ?? id}
+   277→                          </button>
+   278→                        );
+   279→                      })}
+   280→                    </div>
+   281→                  </div>
+   282→                )}
+   283→
+   284→                {/* dropdown */}
+   285→                <div style={{ position: "relative" }}>
+   286→                  {detectedLangs.length > 0 && <p style={{ fontSize: "0.65rem", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px", marginTop: 0, color: "#555" }}>Override manual</p>}
+   287→                  <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{ width: "100%", backgroundColor: currentLang?.color ?? "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", boxShadow: "4px 4px 0 #000", fontWeight: 900, fontSize: "0.95rem", fontFamily: "var(--font-body)" }}>
+   288→                    <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+   289→                      <span style={{ fontSize: "1.2rem" }}>{currentLang?.emoji}</span>
+   290→                      {currentLang?.label}
+   291→                    </span>
+   292→                    <ChevronDown size={16} style={{ transform: dropdownOpen ? "rotate(180deg)" : "", transition: "transform 0.2s", flexShrink: 0 }} />
+   293→                  </button>
+   294→                  {dropdownOpen && (
+   295→                    <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, backgroundColor: "#fff", border: "3px solid #000", borderRadius: "10px", boxShadow: "5px 5px 0 #000", zIndex: 30, overflow: "hidden" }}>
+   296→                      {LANGUAGES.map((lang, idx) => (
+   297→                        <button key={lang.id} onClick={() => { setSelectedLang(lang.id); setDropdownOpen(false); }} style={{ width: "100%", padding: "9px 14px", backgroundColor: lang.id === selectedLang ? lang.color : "#fff", border: "none", borderBottom: idx < LANGUAGES.length - 1 ? "2px solid #eee" : "none", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontWeight: 800, fontSize: "0.88rem", fontFamily: "var(--font-body)", transition: "background-color 0.1s" }}
+   298→                          onMouseEnter={(e) => { if (lang.id !== selectedLang) (e.currentTarget as HTMLElement).style.backgroundColor = "#fef9f0"; }}
+   299→                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = lang.id === selectedLang ? lang.color : "#fff"; }}
+   300→                        >
+   301→                          <span>{lang.emoji}</span>{lang.label}
+   302→                        </button>
+   303→                      ))}
+   304→                    </div>
+   305→                  )}
+   306→                </div>
+   307→
+   308→                {/* info */}
+   309→                <div style={{ backgroundColor: currentLang?.color ?? "#ffe8a3", border: "2px solid #000", borderRadius: "10px", padding: "12px" }}>
+   310→                  <p style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", letterSpacing: "0.04em", lineHeight: 1, margin: 0 }}>{currentLang?.emoji} {currentLang?.label}</p>
+   311→                  <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "#444", marginTop: "4px", marginBottom: 0 }}>Bahasa terpilih untuk ekstraksi kode.</p>
+   312→                </div>
+   313→
+   314→                <div style={{ backgroundColor: "#fef9f0", border: "2px dashed #000", borderRadius: "8px", padding: "10px 12px", marginTop: "auto" }}>
+   315→                  <p style={{ fontSize: "0.72rem", fontWeight: 800, color: "#555", lineHeight: 1.5, margin: 0 }}>
+   316→                    {detectedLangs.length > 0 ? `💡 ${detectedLangs.length} bahasa ditemukan. Klik chip untuk switch preview.` : "💡 Bahasa akan terdeteksi otomatis setelah file diekstrak."}
+   317→                  </p>
+   318→                </div>
+   319→              </div>
+   320→            </Card>
+   321→
+   322→            {/* COL 2: UPLOAD FILE */}
+   323→            <Card>
+   324→              <CardHeader bg="#d4f0e4">
+   325→                <FileText size={15} />
+   326→                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em" }}>UPLOAD FILE</span>
+   327→                <Tag bg="#000" color="#d4f0e4">PDF · DOC · PPTX</Tag>
+   328→              </CardHeader>
+   329→              <div style={{ padding: "14px", display: "flex", flexDirection: "column", flex: 1 }}>
+   330→                {/* drop zone */}
+   331→                <div
+   332→                  onDrop={handleDrop}
+   333→                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+   334→                  onDragLeave={() => setIsDragging(false)}
+   335→                  onClick={() => !uploadedFile && fileInputRef.current?.click()}
+   336→                  role="button" tabIndex={0}
+   337→                  onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !uploadedFile) fileInputRef.current?.click(); }}
+   338→                  style={{ backgroundColor: isDragging ? "#b8e8d0" : "#fef9f0", border: "3px dashed #000", borderRadius: "12px", cursor: uploadedFile ? "default" : "pointer", transition: "background-color 0.15s", position: "relative", flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "14px", padding: "24px 16px", minHeight: "200px" }}
+   339→                >
+   340→                  {(["tl","tr","bl","br"] as const).map((c) => (
+   341→                    <div key={c} style={{ position: "absolute", width: 14, height: 14, backgroundColor: "#ffe8a3", border: "2px solid #000", borderRadius: "3px", top: c[0]==="t" ? -3 : undefined, bottom: c[0]==="b" ? -3 : undefined, left: c[1]==="l" ? -3 : undefined, right: c[1]==="r" ? -3 : undefined }} />
+   342→                  ))}
+   343→
+   344→                  {!uploadedFile ? (
+   345→                    <>
+   346→                      <div style={{ backgroundColor: "#f5f0ff", border: "3px solid #000", borderRadius: "50%", width: "clamp(72px,12vw,96px)", height: "clamp(72px,12vw,96px)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "5px 5px 0 #000" }}>
+   347→                        <Upload size={36} strokeWidth={2.5} />
+   348→                      </div>
+   349→                      <div style={{ textAlign: "center" }}>
+   350→                        <p style={{ fontFamily: "var(--font-display)", fontSize: "clamp(1.1rem,3vw,1.55rem)", letterSpacing: "0.04em", lineHeight: 1.25, margin: 0 }}>Jatuhkan dokumenmu di sini!</p>
+   351→                        <p style={{ fontSize: "0.82rem", fontWeight: 700, color: "#555", marginTop: "5px", marginBottom: 0 }}>atau klik untuk memilih file</p>
+   352→                      </div>
+   353→                      <div style={{ backgroundColor: "#ffe8a3", border: "2px solid #000", borderRadius: "8px", padding: "5px 16px", fontSize: "0.75rem", fontWeight: 800 }}>
+   354→                        Maks. 50MB · PDF, DOC, DOCX, PPTX, XLSX, MD, IPYNB
+   355→                      </div>
+   356→                    </>
+   357→                  ) : (
+   358→                    <>
+   359→                      <div style={{ backgroundColor: "#d4f0e4", border: "3px solid #000", borderRadius: "10px", padding: "14px 18px", width: "90%", maxWidth: 360, display: "flex", alignItems: "center", gap: "10px", boxShadow: "3px 3px 0 #000" }}>
+   360→                        <div style={{ backgroundColor: "#000", borderRadius: "8px", padding: "8px", flexShrink: 0 }}><FileText size={20} color="#d4f0e4" /></div>
+   361→                        <div style={{ flex: 1, minWidth: 0 }}>
+   362→                          <p style={{ fontWeight: 900, fontSize: "0.88rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0 }}>{uploadedFile.name}</p>
+   363→                          <p style={{ fontSize: "0.72rem", fontWeight: 700, color: "#444", margin: 0 }}>{(uploadedFile.size / 1024).toFixed(1)} KB</p>
+   364→                        </div>
+   365→                        <button onClick={(e) => { e.stopPropagation(); setFile(null); }} style={{ backgroundColor: "#ff6b6b", border: "2px solid #000", borderRadius: "6px", padding: "5px", cursor: "pointer", flexShrink: 0, display: "flex" }}>
+   366→                          <X size={14} color="#fff" />
+   367→                        </button>
+   368→                      </div>
+   369→                      <p style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "#009944", letterSpacing: "0.03em", margin: 0 }}>✅ File siap diekstrak!</p>
+   370→                    </>
+   371→                  )}
+   372→                  <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.pptx,.ppt,.xlsx,.xls,.txt,.md,.html,.ipynb,.tex" onChange={handleFileInput} style={{ display: "none" }} />
+   373→                </div>
+   374→
+   375→                {/* extract button */}
+   376→                <button onClick={handleExtract} disabled={!uploadedFile || isExtracting} style={{ marginTop: "12px", width: "100%", backgroundColor: uploadedFile ? "#000" : "#ccc", color: uploadedFile ? "#ffe8a3" : "#888", border: "3px solid #000", borderRadius: "10px", padding: "14px", fontFamily: "var(--font-display)", fontSize: "clamp(1rem,3vw,1.35rem)", letterSpacing: "0.06em", cursor: uploadedFile && !isExtracting ? "pointer" : "not-allowed", boxShadow: uploadedFile ? "5px 5px 0 #ff6b6b" : "none", transition: "transform 0.1s, box-shadow 0.1s", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", flexShrink: 0 }}
+   377→                  onMouseDown={(e) => { if (uploadedFile) { (e.currentTarget as HTMLElement).style.transform = "translate(3px,3px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #ff6b6b"; } }}
+   378→                  onMouseUp={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = uploadedFile ? "5px 5px 0 #ff6b6b" : "none"; }}
+   379→                >
+   380→                  {isExtracting ? (
+   381→                    <><div style={{ width: 20, height: 20, border: "3px solid #ffe8a3", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />SEDANG MENGEKSTRAK...</>
+   382→                  ) : (
+   383→                    <><Zap size={22} fill={uploadedFile ? "#ffe8a3" : "#888"} />{extracted ? "EKSTRAK ULANG!" : "EKSTRAK KODE!"}</>
+   384→                  )}
+   385→                </button>
+   386→              </div>
+   387→            </Card>
+   388→
+   389→            {/* COL 3: HASIL EKSTRAKSI */}
+   390→            <Card>
+   391→              <CardHeader bg="#f5f0ff">
+   392→                <div style={{ display: "flex", gap: "5px" }}>
+   393→                  {["#ff6b6b","#ffe8a3","#d4f0e4"].map((c) => (
+   394→                    <div key={c} style={{ width: 11, height: 11, borderRadius: "50%", backgroundColor: c, border: "2px solid #000" }} />
+   395→                  ))}
+   396→                </div>
+   397→                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", flex: 1 }}>HASIL EKSTRAKSI</span>
+   398→                <div style={{ backgroundColor: extracted ? "#d4f0e4" : extractError ? "#ffd6d6" : "#ffe8a3", border: "2px solid #000", borderRadius: "8px", padding: "2px 9px", fontSize: "0.68rem", fontWeight: 900, display: "flex", alignItems: "center", gap: "4px", fontFamily: "var(--font-body)" }}>
+   399→                  <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: extracted ? "#00aa44" : extractError ? "#ff4444" : "#ffaa00", display: "inline-block" }} />
+   400→                  {extracted ? `${extractedBlocks.length} BLOK` : extractError ? "GAGAL" : "MENUNGGU"}
+   401→                </div>
+   402→              </CardHeader>
+   403→
+   404→              <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+   405→                <div style={{ backgroundColor: "#1a1a2e", height: "100%", overflowY: "auto", padding: "18px", fontFamily: "var(--font-mono)", fontSize: "0.78rem", lineHeight: 1.7, minHeight: "240px" }}>
+   406→                  {!extracted && !isExtracting && !extractError && (
+   407→                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px", opacity: 0.45 }}>
+   408→                      <p style={{ fontFamily: "var(--font-display)", fontSize: "3rem", color: "#aaa", margin: 0 }}>???</p>
+   409→                      <p style={{ color: "#888", fontWeight: 700, textAlign: "center", fontSize: "0.85rem", margin: 0 }}>Upload file &amp; klik EKSTRAK KODE! untuk memulai</p>
+   410→                    </div>
+   411→                  )}
+   412→                  {extractError && !isExtracting && (
+   413→                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
+   414→                      <p style={{ fontFamily: "var(--font-display)", fontSize: "1.3rem", color: "#ff6b6b", textAlign: "center", margin: 0 }}>{extractError}</p>
+   415→                    </div>
+   416→                  )}
+   417→                  {isExtracting && (
+   418→                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "16px" }}>
+   419→                      <p style={{ fontFamily: "var(--font-display)", fontSize: "1.8rem", color: "#ffe8a3", animation: "pulse 0.8s ease-in-out infinite alternate", margin: 0 }}>MENGANALISIS FILE...</p>
+   420→                      <div style={{ display: "flex", gap: "6px" }}>
+   421→                        {[0,1,2,3,4].map((i) => <div key={i} style={{ width: 8, height: 8, backgroundColor: "#d4f0e4", borderRadius: "50%", animation: `bounce 0.6s ease-in-out ${i*0.1}s infinite alternate` }} />)}
+   422→                      </div>
+   423→                    </div>
+   424→                  )}
+   425→                  {(extracted || (!extracted && !isExtracting && !extractError)) && !isExtracting && (
+   426→                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#e8f4fd" }}>
+   427→                      <code>{extracted ? displayCode : ""}</code>
+   428→                    </pre>
+   429→                  )}
+   430→                </div>
+   431→
+   432→                {/* action buttons */}
+   433→                {extracted && (
+   434→                  <div style={{ position: "absolute", bottom: 14, right: 14, display: "flex", gap: "8px", zIndex: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+   435→                    {/* Save snippet — hanya user login */}
+   436→                    {savedSnippetId ? (
+   437→                      <button onClick={() => router.push(`/snippets/${savedSnippetId}`)}
+   438→                        style={{ backgroundColor: "#d4f0e4", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px" }}>
+   439→                        <Check size={14} strokeWidth={3} /> Tersimpan! Lihat
+   440→                      </button>
+   441→                    ) : (
+   442→                      <button onClick={handleSave} disabled={saving}
+   443→                        title={user ? "Simpan ke akun saya" : "Login dulu untuk simpan"}
+   444→                        style={{ backgroundColor: user ? "#f5f0ff" : "#eee", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: saving ? "not-allowed" : "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px", opacity: saving ? 0.6 : 1 }}>
+   445→                        {saving ? "⏳..." : (<><Save size={14} /> {user ? "Simpan" : "🔒 Login utk Simpan"}</>)}
+   446→                      </button>
+   447→                    )}
+   448→                    <button onClick={handleDownload} style={{ backgroundColor: "#d4f0e4", border: "3px solid #000", borderRadius: "999px", padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #000", display: "flex", alignItems: "center", gap: "5px", transition: "all 0.15s" }}
+   449→                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "2px 2px 0 #000"; }}
+   450→                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "4px 4px 0 #000"; }}
+   451→                    >
+   452→                      ⬇ .{currentLang?.ext ?? "txt"}
+   453→                    </button>
+   454→                    <button onClick={handleCopy} style={{ backgroundColor: copied ? "#d4f0e4" : "#ff6b6b", border: "3px solid #000", borderRadius: "999px", padding: "10px 18px", fontFamily: "var(--font-display)", fontSize: "0.9rem", letterSpacing: "0.06em", cursor: "pointer", boxShadow: copied ? "2px 2px 0 #000" : "5px 5px 0 #000", transform: copied ? "translate(3px,3px)" : "", transition: "all 0.15s", display: "flex", alignItems: "center", gap: "6px" }}
+   455→                      onMouseEnter={(e) => { if (!copied) { (e.currentTarget as HTMLElement).style.transform = "translate(2px,2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "3px 3px 0 #000"; } }}
+   456→                      onMouseLeave={(e) => { if (!copied) { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "5px 5px 0 #000"; } }}
+   457→                    >
+   458→                      {copied ? <Check size={14} strokeWidth={3} /> : <Copy size={14} />}
+   459→                      {copied ? "TERSALIN!" : "BOOM! Salin Kode"}
+   460→                    </button>
+   461→                  </div>
+   462→                )}
+   463→              </div>
+   464→
+   465→              {extracted && activeBlock && (
+   466→                <div style={{ backgroundColor: "#ffe0d0", borderTop: "3px solid #000", padding: "7px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, fontFamily: "var(--font-body)" }}>
+   467→                  <span style={{ fontSize: "0.7rem", fontWeight: 900 }}>{currentLang?.emoji} {currentLang?.label} · {activeBlock.lines} baris</span>
+   468→                  <span style={{ fontSize: "0.7rem", fontWeight: 900, color: "#555" }}>{new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}</span>
+   469→                </div>
+   470→              )}
+   471→            </Card>
+   472→
+   473→          </div>
+   474→
+   475→          {/* FILE TERBARU */}
+   476→          <div style={{ marginTop: "16px", backgroundColor: "#fff", border: "3px solid #000", borderRadius: "16px", boxShadow: "5px 5px 0 #000", overflow: "hidden" }}>
+   477→            <div style={{ backgroundColor: "#ffe0d0", borderBottom: "3px solid #000", padding: "11px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
+   478→              <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", letterSpacing: "0.05em" }}>📂 SNIPPET TERSIMPAN</span>
+   479→              <Tag bg="#000" color="#ffe0d0">DB SUPABASE</Tag>
+   480→            </div>
+   481→            <div style={{ padding: "28px 20px", textAlign: "center", backgroundColor: "#fef9f0" }}>
+   482→              {user ? (
+   483→                <>
+   484→                  <p style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", letterSpacing: "0.04em", margin: "0 0 6px 0" }}>
+   485→                    Halo, {user.name || user.email.split("@")[0]}! 👋
+   486→                  </p>
+   487→                  <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "#555", margin: "0 0 18px 0", fontFamily: "var(--font-body)" }}>
+   488→                    Klik tombol di bawah untuk lihat semua snippet yang sudah kamu simpan
+   489→                  </p>
+   490→                  <button onClick={() => router.push("/dashboard")}
+   491→                    style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "12px 24px", fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+   492→                    <FolderOpen size={16} /> Buka Dashboard
+   493→                  </button>
+   494→                </>
+   495→              ) : (
+   496→                <>
+   497→                  <p style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", letterSpacing: "0.04em", margin: "0 0 6px 0" }}>
+   498→                    🔒 Fitur Simpan Snippet
+   499→                  </p>
+   500→                  <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "#555", margin: "0 0 18px 0", fontFamily: "var(--font-body)" }}>
+   501→                    Login untuk simpan hasil ekstraksi ke akunmu. File asli TIDAK disimpan — hanya nama file + text kode.
+   502→                    Bisa di-download ulang kapan saja sebagai file .py / .js / .sql sesuai bahasa.
+   503→                  </p>
+   504→                  <button onClick={() => router.push("/auth")}
+   505→                    style={{ backgroundColor: "#000", color: "#ffe8a3", border: "3px solid #000", borderRadius: "10px", padding: "12px 24px", fontFamily: "var(--font-display)", fontSize: "1.1rem", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "4px 4px 0 #ff6b6b", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+   506→                    <LogIn size={16} /> MASUK / DAFTAR <ChevronRight size={14} />
+   507→                  </button>
+   508→                </>
+   509→              )}
+   510→            </div>
+   511→          </div>
+   512→
+   513→        </main>
+   514→      </div>
+   515→    </>
+   516→  );
+   517→}
+   518→

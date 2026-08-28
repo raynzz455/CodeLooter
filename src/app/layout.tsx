@@ -1,35 +1,30 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Nunito, Bangers } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/codelooter/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const nunito = Nunito({
   subsets: ["latin"],
+  variable: "--font-nunito",
+  weight: ["400", "600", "700", "800", "900"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const bangers = Bangers({
   subsets: ["latin"],
+  variable: "--font-bangers",
+  weight: "400",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "CodeLooter — Ekstraksi kode presisi dari modul praktikum",
+  title: "CodeLooter — Ekstrak Kode dari Dokumen",
   description:
-    "Ekstrak code block dari PDF, Markdown, IPYNB, HTML, dan LaTeX secara presisi. Phase 1: merge blok terpotong, filter narasi, repair line-wrap, strip R-output.",
-  keywords: [
-    "CodeLooter", "ekstraksi kode", "PDF", "R", "modul praktikum",
-    "code extractor", "pattern extraction",
-  ],
-  authors: [{ name: "CodeLooter" }],
+    "Ambil semua kode dari PDF, DOCX, Markdown, IPYNB secara instan. Neo-brutalist code extraction.",
+  keywords: ["code extractor", "pdf to code", "ekstrak kode", "CodeLooter"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
-  openGraph: {
-    title: "CodeLooter",
-    description: "Ekstraksi kode presisi dari modul praktikum & paper akademik",
-    type: "website",
   },
 };
 
@@ -39,10 +34,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
+    <html lang="id" suppressHydrationWarning className={`${nunito.variable} ${bangers.variable}`}>
+      <head>
+        {/* JetBrains Mono untuk code block */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="antialiased bg-background text-foreground">
         <ThemeProvider>
           {children}
           <Toaster position="top-center" richColors closeButton />

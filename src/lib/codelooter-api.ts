@@ -74,6 +74,28 @@ export async function extractFile(file: File, lang: string): Promise<ExtractResu
   return res.json();
 }
 
+// LLM-based extraction: POSTs the file to /api/extract-llm?lang=<lang>, which
+// extracts the text with the same pure-TS PDF / format parsers, then asks the
+// z-ai-web-dev-sdk LLM to identify code blocks. Slower than the pattern-based
+// extractFile but may catch code that the regex/density extractor misses (e.g.
+// code embedded in narrative prose without explicit markers).
+//
+// On any LLM failure the server falls back to the pattern extractor, so this
+// endpoint always returns an ExtractResult — never throws because of the LLM.
+export async function extractFileLLM(file: File, lang: string): Promise<ExtractResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/extract-llm?lang=${encodeURIComponent(lang)}`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(e.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export interface BatchResult {
   filename: string;
   blocks: CodeBlock[];
