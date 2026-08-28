@@ -174,17 +174,47 @@ export function isCodeLine(line: string): boolean {
   }
   // assignment patterns
   if (/\w+\s*<-\s/.test(t)) return true;
+  if (/\w+\s*<-\s*$/.test(t)) return true; // dangling assignment (multi-line)
   if (/\w+\s*=\s*c\s*\(/.test(t)) return true;
   if (/\w+\s*=\s*\d/.test(t) && !/^\s*(if|while|for)\s/.test(t)) return true;
+  // String assignment: var = "..." or var = '...' (R/Python/JS)
+  if (/^\w+\s*=\s*["']/.test(t)) return true;
+  // Multi-line string continuation (indented continuation of a string)
+  if (/^\s+["']/.test(t) && line.length > line.trimStart().length) return true;
+  // R function call with $ accessor: data$column
+  if (/\$\w+/.test(t) && /[()]/.test(t)) return true;
+  // Continuation lines (indented, ending with comma/operator) — these are
+  // part of a multi-line function call.
+  if (/^\s+\w+\s*=/.test(t) && /[,)]\s*$/.test(t)) return true;
+  if (/^\s+["'].*["']/.test(t)) return true; // indented string content
 
   // Python signals
   if (/^\s*(import|from)\s+\w/.test(t)) return true;
   if (/^\s*def\s+\w+\s*\(/.test(t)) return true;
   if (/^\s*class\s+\w+/.test(t)) return true;
   if (/^\s*if\s+__name__/.test(t)) return true;
-  if (/^\s*(print|return|raise|break|continue|pass)\s*\(/.test(t)) return true;
-  if (/^\s*elif\s+/.test(t)) return true;
+  if (/^\s*(print|return|raise|break|continue|pass)\s*[\(\s]/.test(t)) return true;
+  if (/^\s*return\s/.test(t)) return true; // `return -1` or `return value`
+  if (/^\s*(if|elif|while|for|else)\s.*:\s*$/.test(t)) return true; // control flow with colon
   if (/^\s*else\s*:/.test(t)) return true;
+  if (/^\s*elif\s+/.test(t)) return true;
+  if (/^\s*#\s/.test(t)) return true; // Python/R comment
+  // Indented continuation (Python block body) — starts with 4+ spaces and has code tokens
+  if (/^\s{4,}\w+/.test(t) && /[()=<>+\-*/]/.test(t) && !t.endsWith(".") && !t.endsWith(":")) {
+    if (proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
+  }
+  // `if condition:` pattern (with or without trailing colon)
+  if (/^\s*if\s+\w+.*[<>=!]/.test(t) && !t.endsWith(".")) return true;
+  // `while condition:` pattern
+  if (/^\s*while\s+.+[:<>=!]/.test(t)) return true;
+  // Variable assignment with comparison: `low = mid + 1`, `high = mid - 1`
+  if (/^\s*\w+\s*=\s*\w+.*[+\-*/]/.test(t)) return true;
+  // Variable assignment with expression: `mid = (low + high) // 2`
+  if (/^\s*\w+\s*=\s*[\(\d]/.test(t) && /[+\-*/]/.test(t)) return true;
+  // Floor division operator (Python): `//`
+  if (/\w+\s*\/\//.test(t)) return true;
+  // Array access: `arr[mid]`
+  if (/^\s*\w+\[\w+\]/.test(t)) return true;
 
   // SQL signals — case-insensitive
   if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION)\b/i.test(t)) return true;

@@ -1,13 +1,14 @@
-// POST /api/extract?lang=r
+// POST /api/extract?lang=r&nlp=1
 // Accept a file upload (PDF, MD, IPYNB, HTML, TXT, TEX) and return extracted
 // code blocks. `lang` may be "auto" or a forced language code.
+// `nlp=1` enables NLP-based re-classification using a HuggingFace model.
 
 import { NextRequest, NextResponse } from "next/server";
 import { extractFromFile, ALL_SUPPORTED_EXTS } from "@/lib/extractor";
 import { getCacheStats, clearCache } from "@/lib/extractor/cache";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   const form = await req.formData();
@@ -19,6 +20,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const lang = (req.nextUrl.searchParams.get("lang") || "auto").toLowerCase();
+  const useNLP = req.nextUrl.searchParams.get("nlp") === "1";
   const filename = file.name || "upload.txt";
   const ext = (filename.split(".").pop() || "").toLowerCase();
   if (!ALL_SUPPORTED_EXTS.has(ext)) {
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await extractFromFile({ filename, content, lang });
+    const result = await extractFromFile({ filename, content, lang, useNLP });
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json(

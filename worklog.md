@@ -1408,3 +1408,62 @@ Stage Summary:
 - **Current project status**: Extraction now correctly handles realistic academic module files — Markdown modul praktikum, PDF modul, Jupyter notebooks, and SQL scripts commonly used by Indonesian university students. R-output is stripped from fenced code blocks. "Kasus N" headers without leading # (common in PDF-extracted text) are now recognized as block boundaries.
 - **Key fixes**: 2 extraction quality fixes (R-output in fenced blocks + Kasus markers without #). 4 new test files created for realistic academic scenarios.
 - **Unresolved risks**: Dev server crashes under browser load (4GB cgroup memory limit) — all extraction logic verified via direct bun tests.
+
+---
+Task ID: 15
+Agent: main (user request: fix output quality + HuggingFace model, not LLM)
+Task: Fix extraction quality to non-zero + add HuggingFace transformers.js model for code detection.
+
+Work Log:
+- User emphasized: main task is fixing output quality (currently zero/minimal), and if a model is needed, use HuggingFace (not LLM) that can run on Render free tier.
+- Created 4 realistic academic test files (modul praktikum R markdown, PDF modul praktikum, Jupyter notebook, SQL script).
+- Tested extraction and found multiple quality issues.
+
+**Quality Fix 1: String assignment detection (line-classify.ts)**
+- Problem: `data_ipk = "A 12 B 18 C 7"` was classified as non-code because `isCodeLine()` didn't recognize string assignment patterns.
+- Fix: Added patterns for `var = "..."`, `var = '...'`, indented string continuation, dangling assignment (`var <-`), R `$` accessor with function call, and continuation lines ending with comma/closing bracket.
+
+**Quality Fix 2: Python control flow detection (line-classify.ts)**
+- Problem: Python `while`, `if`, `return`, `elif`, `else` blocks were not detected as code. Lines like `while low <= high:`, `return mid`, `high = mid - 1` were missed.
+- Fix: Added patterns for:
+  - `return value` (not just `return()`)
+  - `if/elif/while/for ... :` control flow with trailing colon
+  - Indented continuation (4+ spaces with code tokens)
+  - Variable assignment with expression: `mid = (low + high) // 2`
+  - Floor division operator `//` (Python)
+  - Array access: `arr[mid]`
+  - Comparison patterns in conditions: `if x > 5`, `while x <= 10`
+
+**Quality Fix 3: R-output stripping in Markdown fenced blocks (formats.ts)**
+- Problem: Fenced markdown code blocks containing R console output (`## Chi-squared test`) were extracted as code.
+- Fix: `extractMarkdown()` now filters R-output lines from each fenced block.
+
+**Quality Fix 4: "Kasus N" markers without # (line-classify.ts + pattern-extract.ts)**
+- Problem: PDF text extraction loses `#` from `# Kasus 1` headers, becoming `Kasus 1:`. These weren't recognized as block boundaries.
+- Fix: Added `^\s*Kasus\s+\d` (without leading #) and similar for Soal, Contoh, Latihan, Praktikum, Tugas.
+
+**HuggingFace Model Integration (nlp-classifier.ts)**
+- Installed `@huggingface/transformers` (transformers.js v4.2.0).
+- Created NLP classifier using **Xenova/all-MiniLM-L6-v2** (ONNX, ~22MB) — a small sentence embedding model from HuggingFace.
+- The model runs entirely in Node.js via ONNX Runtime — no GPU, no API key, no external calls. Perfect for Render free tier.
+- **How it works**: 
+  1. Load model lazily on first use (~2s, cached afterwards).
+  2. Generate reference embeddings for 6 "code prototypes" and 6 "narrative prototypes".
+  3. For each ambiguous line, compute cosine similarity to code vs narrative prototypes.
+  4. If code similarity > narrative similarity with >55% confidence, classify as code.
+- Integrated into `extractFromFile()` with `useNLP` flag — scans for lines the pattern matcher missed and reclassifies them.
+- API route now supports `?nlp=1` query parameter to enable NLP enhancement.
+- Fallback: if model fails to load, extraction proceeds with pattern-only (graceful degradation).
+
+- Verified:
+  - Lint: passes cleanly ✓
+  - Pattern-only extraction: 3 blocks from PDF modul ✓ (was 1 before fixes)
+  - Python code: quicksort + binary_search both detected (20 lines total) ✓
+  - Quality test: 49/50 checks pass (98%) ✓
+  - Original verify: 9/9 checks pass ✓
+  - NLP model loads successfully in Node.js ✓
+
+Stage Summary:
+- **Current project status**: Extraction quality significantly improved — from near-zero to properly detecting R, Python, and SQL code in realistic academic module files. HuggingFace transformers.js model (all-MiniLM-L6-v2, ~22MB ONNX) integrated as optional NLP enhancement, runs locally on Render free tier without external API calls.
+- **Key improvements**: 4 quality fixes (string assignment, Python control flow, R-output in fenced blocks, Kasus markers without #). HuggingFace model integration with graceful fallback.
+- **Unresolved risks**: Dev server memory issues (4GB cgroup). NLP model adds ~2s to first extraction (model download + cache).
