@@ -1,0 +1,1148 @@
+     1→"use client";
+     2→
+     3→import { useState, useEffect } from "react";
+     4→import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Tag } from "lucide-react";
+     5→import { motion, AnimatePresence } from "framer-motion";
+     6→import { Button } from "@/components/ui/button";
+     7→import { Input } from "@/components/ui/input";
+     8→import { toast } from "sonner";
+     9→import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
+    10→import { saveSnippet } from "@/lib/codelooter-api";
+    11→import { CodeBlockCard, highlight, TOKEN_CLASS } from "./code-block-card";
+    12→import { StatsBar } from "./stats-bar";
+    13→import { StatsChart } from "./stats-chart";
+    14→import { LoadingSkeleton } from "./loading-skeleton";
+    15→import { ComparisonView } from "./comparison-view";
+    16→import { SortableBlockList } from "./sortable-block-list";
+    17→
+    18→interface ResultPanelProps {
+    19→  result: ExtractResult | null;
+    20→  loading: boolean;
+    21→  /**
+    22→   * Called after a snippet is saved as a NEW record (existing behaviour).
+    23→   * Receives the freshly-created snippet id (and the tags that were sent
+    24→   * with the save) so the parent can adopt them as the new
+    25→   * `currentSnippetId` / `currentTags` (allowing subsequent edits to
+    26→   * update the same record in-place).
+    27→   */
+    28→  onSaved: (snippetId?: string, tags?: string) => void;
+    29→  /**
+    30→   * ID of the snippet currently loaded into the panel. When set, an extra
+    31→   * "Update" button is rendered next to "Simpan" so the user can push
+    32→   * their edits back to the same snippet record instead of creating a
+    33→   * duplicate.
+    34→   */
+    35→  currentSnippetId?: string;
+    36→  /**
+    37→   * Invoked when the user clicks "Update". The parent performs the actual
+    38→   * PATCH /api/snippets/[id] call, shows a toast, and refreshes the list.
+    39→   * Receives the panel's current (possibly edited) blocks so the PATCH
+    40→   * payload reflects in-panel edits (merge, split, delete, duplicate,
+    41→   * reorder, text edits) — not the stale `result.blocks` from the parent.
+    42→   * The optional `tags` parameter forwards the panel's current tag input
+    43→   * so the PATCH can also update the snippet's tags in the same round-trip.
+    44→   */
+    45→  onUpdateSnippet?: (id: string, blocks: CodeBlock[], tags?: string) => Promise<void> | void;
+    46→  /**
+    47→   * Comma-separated tags of the snippet currently loaded into the panel
+    48→   * (mirrors `currentSnippetId`). When a saved snippet is selected from
+    49→   * the list, the parent forwards its `tags` here so the tag input can be
+    50→   * pre-populated. `undefined` for a fresh extraction (no associated
+    51→   * snippet) → the input is cleared.
+    52→   */
+    53→  currentTags?: string;
+    54→}
+    55→
+    56→export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpdateSnippet, currentTags }: ResultPanelProps) {
+    57→  const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
+    58→  const [saving, setSaving] = useState(false);
+    59→  const [updating, setUpdating] = useState(false);
+    60→  const [copiedAll, setCopiedAll] = useState(false);
+    61→  const [copiedMd, setCopiedMd] = useState(false);
+    62→  const [zipping, setZipping] = useState(false);
+    63→  const [exportingHtml, setExportingHtml] = useState(false);
+    64→  const [exportingJson, setExportingJson] = useState(false);
+    65→  const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
+    66→  const [reorderMode, setReorderMode] = useState(false);
+    67→  // Tag input value (comma-separated). Synced from `currentTags` whenever
+    68→  // the parent loads a new snippet (or clears the panel); the user can then
+    69→  // freely edit the value, which is forwarded to saveSnippet / updateSnippet.
+    70→  const [tagInput, setTagInput] = useState("");
+    71→
+    72→  // In-block search & language filter state. The search input lives below
+    73→  // the file header card and narrows the visible blocks list (the header
+    74→  // stats still reflect ALL blocks). Both are reset whenever a new result
+    75→  // arrives so a stale query from a previous file doesn't bleed over.
+    76→  const [searchQuery, setSearchQuery] = useState("");
+    77→  const [langFilter, setLangFilter] = useState("all");
+    78→
+    79→  // Multi-select state for bulk operations (copy / delete / ZIP). The set
+    80→  // holds block `index` values — the same key used by every per-block
+    81→  // handler above. We reset it whenever the underlying result changes so
+    82→  // stale selections from a previous file don't bleed into the new one.
+    83→  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+    84→  // Tracks the bulk-delete confirmation flow (mirrors the per-block pattern
+    85→  // in CodeBlockCard: first click arms, second click within 3s commits).
+    86→  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+    87→  const [bulkZipping, setBulkZipping] = useState(false);
+    88→  const [bulkCopied, setBulkCopied] = useState(false);
+    89→
+    90→  // File extension per language, mirroring the server-side extForLang helper.
+    91→  const extForLang = (lang: string): string =>
+    92→    ({
+    93→      r: "R",
+    94→      python: "py",
+    95→      sql: "sql",
+    96→      java: "java",
+    97→      cpp: "cpp",
+    98→      javascript: "js",
+    99→      typescript: "ts",
+   100→      php: "php",
+   101→      kotlin: "kt",
+   102→      go: "go",
+   103→      rust: "rs",
+   104→      bash: "sh",
+   105→    }[lang] ?? "txt");
+   106→
+   107→  // BUGFIX: Reset local editable blocks whenever a new result arrives.
+   108→  // Previously, editing a block then extracting a new file would show the
+   109→  // old edited blocks instead of the fresh extraction result.
+   110→  useEffect(() => {
+   111→    setBlocks(null);
+   112→    setViewMode("extracted");
+   113→    setReorderMode(false);
+   114→    // Reset the in-block search & language filter so a query from the
+   115→    // previous file doesn't bleed into the newly-loaded result.
+   116→    setSearchQuery("");
+   117→    setLangFilter("all");
+   118→    // Clear any active multi-select so stale selections don't bleed into
+   119→    // the newly-loaded result.
+   120→    setSelectedIndices(new Set());
+   121→    setConfirmBulkDelete(false);
+   122→    // A fresh extraction has no associated snippet → clear the tag input so
+   123→    // tags from a previously-loaded snippet don't bleed into the new save.
+   124→    // The dedicated `currentTags` sync effect below will overwrite this
+   125→    // immediately when a saved snippet is loaded instead.
+   126→    setTagInput("");
+   127→  }, [result]);
+   128→
+   129→  // Sync the tag input from the parent's `currentTags` prop. This fires
+   130→  // whenever the user selects a saved snippet (parent forwards its tags) or
+   131→  // when the parent clears the panel (currentTags becomes undefined). The
+   132→  // effect is intentionally keyed on `currentTags` only — not `result` — so
+   133→  // an in-progress tag edit isn't wiped when a fresh extraction of a
+   134→  // different file replaces `result` (the reset-on-result effect above
+   135→  // already handles the clear-on-new-extraction case).
+   136→  useEffect(() => {
+   137→    setTagInput(currentTags ?? "");
+   138→  }, [currentTags]);
+   139→
+   140→  // Sync local editable blocks whenever a new result arrives.
+   141→  const effectiveBlocks = blocks ?? result?.blocks ?? [];
+   142→
+   143→  // ── In-block search & language filter ─────────────────────────────────
+   144→  // Text match is a case-insensitive substring search over `b.code`. The
+   145→  // language match is exact-equality against the dropdown value (or "all"
+   146→  // to disable the language filter). Both conditions are AND-combined so a
+   147→  // user searching "ggplot2" with the language set to "r" sees only R
+   148→  // blocks whose code contains "ggplot2".
+   149→  //
+   150→  // NOTE: the file header card (total count, language distribution, line
+   151→  // totals, copy/zip/save buttons) still uses `effectiveBlocks` — those
+   152→  // reflect the FULL extraction, not the filtered subset. Only the visible
+   153→  // blocks list renders `filteredBlocks`.
+   154→  const uniqueLangs = Array.from(new Set(effectiveBlocks.map((b) => b.lang)));
+   155→  const trimmedQuery = searchQuery.trim().toLowerCase();
+   156→  const filteredBlocks = effectiveBlocks.filter((b) => {
+   157→    const matchesText = trimmedQuery === "" || b.code.toLowerCase().includes(trimmedQuery);
+   158→    const matchesLang = langFilter === "all" || b.lang === langFilter;
+   159→    return matchesText && matchesLang;
+   160→  });
+   161→  const isFiltering = trimmedQuery !== "" || langFilter !== "all";
+   162→
+   163→  const handleSave = async () => {
+   164→    if (!result) return;
+   165→    setSaving(true);
+   166→    try {
+   167→      const saved = await saveSnippet(
+   168→        result.filename,
+   169→        effectiveBlocks,
+   170→        effectiveBlocks[0]?.lang ?? "unknown",
+   171→        result.size,
+   172→        // Forward the tag input so the new snippet is created with the
+   173→        // user's tags (comma-separated). Empty string is a no-op on the
+   174→        // server (default is "").
+   175→        tagInput.trim(),
+   176→      );
+   177→      toast.success(`Snippet disimpan · ${saved.id.slice(0, 8)}`);
+   178→      // Adopt the freshly-created snippet as the current one so subsequent
+   179→      // edits can be pushed back via "Update" rather than re-saving a copy.
+   180→      // Also forward the tags that were sent so the parent's `currentTags`
+   181→      // state matches what was persisted (otherwise the [currentTags] sync
+   182→      // effect could later overwrite an in-progress tag edit).
+   183→      onSaved(saved.id, tagInput.trim());
+   184→    } catch (e: any) {
+   185→      toast.error(e?.message ?? "Gagal menyimpan");
+   186→    } finally {
+   187→      setSaving(false);
+   188→    }
+   189→  };
+   190→
+   191→  // Push the current editable blocks back to the *existing* snippet record
+   192→  // (identified by `currentSnippetId`). The parent owns the actual API call
+   193→  // (so it can also refresh the snippet list + show a toast) — this handler
+   194→  // just toggles the loading state on the button and forwards the id.
+   195→  const handleUpdate = async () => {
+   196→    if (!currentSnippetId || !onUpdateSnippet) return;
+   197→    if (effectiveBlocks.length === 0) return;
+   198→    setUpdating(true);
+   199→    try {
+   200→      // Pass the panel's effective (possibly edited) blocks so the parent's
+   201→      // PATCH payload reflects in-panel edits — not stale result.blocks.
+   202→      // Also forward the current tagInput so the snippet's tags can be
+   203→      // updated alongside the code (the parent's PATCH handler accepts an
+   204→      // optional `tags` parameter).
+   205→      await onUpdateSnippet(currentSnippetId, effectiveBlocks, tagInput.trim());
+   206→    } finally {
+   207→      setUpdating(false);
+   208→    }
+   209→  };
+   210→
+   211→  const handleDownloadAll = () => {
+   212→    if (!result) return;
+   213→    // Download all blocks as a single text blob (client-side, no snippet needed).
+   214→    const dominant = effectiveBlocks[0]?.lang ?? "unknown";
+   215→    const ext =
+   216→      { r: "R", python: "py", sql: "sql", java: "java", cpp: "cpp", javascript: "js", typescript: "ts" }[dominant] ?? "txt";
+   217→    const sep = "#".repeat(60);
+   218→    const body = effectiveBlocks
+   219→      .map((b, i) => `${sep}\n# Block #${b.index} | ${b.lang} | ${b.lines} lines\n${sep}\n${b.code}`)
+   220→      .join("\n\n");
+   221→    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+   222→    const url = URL.createObjectURL(blob);
+   223→    const a = document.createElement("a");
+   224→    a.href = url;
+   225→    a.download = `${result.filename.replace(/\.[^.]+$/, "") || "codelooter"}.${ext}`;
+   226→    a.click();
+   227→    URL.revokeObjectURL(url);
+   228→    toast.success("File kode diunduh");
+   229→  };
+   230→
+   231→  const handleDownloadZip = async () => {
+   232→    if (!result || effectiveBlocks.length === 0) return;
+   233→    setZipping(true);
+   234→    try {
+   235→      // Dynamic import keeps jszip out of the initial client bundle.
+   236→      const JSZip = (await import("jszip")).default;
+   237→      const zip = new JSZip();
+   238→      const used = new Map<string, number>();
+   239→      for (const b of effectiveBlocks) {
+   240→        const ext = extForLang(b.lang);
+   241→        let name = `block_${b.index}.${ext}`;
+   242→        if (used.has(name)) {
+   243→          const n = used.get(name)! + 1;
+   244→          used.set(name, n);
+   245→          name = `block_${b.index}_${n}.${ext}`;
+   246→        } else {
+   247→          used.set(name, 0);
+   248→        }
+   249→        zip.file(name, b.code);
+   250→      }
+   251→      const blob = await zip.generateAsync({
+   252→        type: "blob",
+   253→        compression: "DEFLATE",
+   254→        compressionOptions: { level: 6 },
+   255→      });
+   256→      const url = URL.createObjectURL(blob);
+   257→      const a = document.createElement("a");
+   258→      a.href = url;
+   259→      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+   260→      a.download = `${base}_blocks.zip`;
+   261→      a.click();
+   262→      URL.revokeObjectURL(url);
+   263→      toast.success(`ZIP dengan ${effectiveBlocks.length} file dibuat`);
+   264→    } catch (e: any) {
+   265→      toast.error(e?.message ?? "Gagal membuat ZIP");
+   266→    } finally {
+   267→      setZipping(false);
+   268→    }
+   269→  };
+   270→
+   271→  // Build a self-contained, syntax-highlighted HTML file with all extracted
+   272→  // code blocks. Reuses the lightweight `highlight()` tokenizer from
+   273→  // code-block-card so the exported colours match the in-app dark-mode view.
+   274→  // No external CSS / JS — every style is inlined so the file works offline.
+   275→  const handleDownloadHtml = () => {
+   276→    if (!result || effectiveBlocks.length === 0) return;
+   277→    setExportingHtml(true);
+   278→    try {
+   279→      // HTML-escape every text node before it lands inside <code>.
+   280→      const escapeHtml = (s: string): string =>
+   281→        s
+   282→          .replace(/&/g, "&amp;")
+   283→          .replace(/</g, "&lt;")
+   284→          .replace(/>/g, "&gt;")
+   285→          .replace(/"/g, "&quot;")
+   286→          .replace(/'/g, "&#39;");
+   287→
+   288→      // Inline-style palette mirroring TOKEN_CLASS dark-mode colours.
+   289→      // Typed against `keyof typeof TOKEN_CLASS` so this stays in sync if a
+   290→      // new token category is added upstream. Strictly emerald / teal / amber
+   291→      // / rose / slate — no blue or indigo.
+   292→      const HTML_COLOR: Record<keyof typeof TOKEN_CLASS, { color: string; extra?: string }> = {
+   293→        comment: { color: "#94a3b8", extra: "font-style: italic;" }, // slate-400
+   294→        string:  { color: "#34d399" },                              // emerald-400
+   295→        number:  { color: "#fbbf24" },                              // amber-400
+   296→        keyword: { color: "#fb7185", extra: "font-weight: 600;" },  // rose-400
+   297→        func:    { color: "#2dd4bf" },                              // teal-400
+   298→        ident:   { color: "#e2e8f0" },                              // slate-200
+   299→        op:      { color: "#94a3b8" },                              // slate-400
+   300→        nl:      { color: "inherit" },
+   301→      };
+   302→
+   303→      // Render a single block's code to highlighted, escaped HTML spans.
+   304→      const renderCode = (b: CodeBlock): string => {
+   305→        const toks = highlight(b.code, b.lang);
+   306→        return toks
+   307→          .map((tk) => {
+   308→            const esc = escapeHtml(tk.t);
+   309→            const cfg = HTML_COLOR[tk.c] ?? HTML_COLOR.ident;
+   310→            if (tk.c === "nl") return esc;
+   311→            const style = cfg.extra
+   312→              ? `color:${cfg.color};${cfg.extra}`
+   313→              : `color:${cfg.color}`;
+   314→            return `<span style="${style}">${esc}</span>`;
+   315→          })
+   316→          .join("");
+   317→      };
+   318→
+   319→      const baseName = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+   320→      const today = new Date().toISOString().slice(0, 10);
+   321→
+   322→      const sections = effectiveBlocks
+   323→        .map((b) => {
+   324→          const langLabel = (b.lang || "text").toUpperCase();
+   325→          return `    <section class="block">
+   326→      <header class="block-head">
+   327→        <span class="idx">#${b.index}</span>
+   328→        <span class="lang">${escapeHtml(langLabel)}</span>
+   329→        <span class="meta">${b.lines} lines</span>
+   330→      </header>
+   331→      <pre><code>${renderCode(b)}</code></pre>
+   332→    </section>`;
+   333→        })
+   334→        .join("\n");
+   335→
+   336→      const html = `<!DOCTYPE html>
+   337→<html lang="en">
+   338→<head>
+   339→  <meta charset="UTF-8">
+   340→  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   341→  <title>${escapeHtml(baseName)} — CodeLooter Export</title>
+   342→  <style>
+   343→    :root { color-scheme: dark; }
+   344→    * { box-sizing: border-box; }
+   345→    body {
+   346→      margin: 0;
+   347→      background: #0f172a;
+   348→      color: #e2e8f0;
+   349→      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+   350→      padding: 1.5rem 1rem 3rem;
+   351→      line-height: 1.5;
+   352→    }
+   353→    .container { max-width: 960px; margin: 0 auto; }
+   354→    h1 {
+   355→      font-size: 1.5rem;
+   356→      font-weight: 700;
+   357→      margin: 0 0 .25rem;
+   358→      color: #f8fafc;
+   359→      word-break: break-all;
+   360→    }
+   361→    .subtitle {
+   362→      color: #94a3b8;
+   363→      font-size: .875rem;
+   364→      margin: 0 0 1.5rem;
+   365→    }
+   366→    .block {
+   367→      background: #1e293b;
+   368→      border: 1px solid #334155;
+   369→      border-radius: .6rem;
+   370→      margin: 0 0 1rem;
+   371→      overflow: hidden;
+   372→    }
+   373→    .block-head {
+   374→      display: flex;
+   375→      align-items: center;
+   376→      gap: .75rem;
+   377→      padding: .6rem .9rem;
+   378→      background: #0f172a;
+   379→      border-bottom: 1px solid #334155;
+   380→      font-size: .8rem;
+   381→    }
+   382→    .block-head .idx {
+   383→      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+   384→      color: #94a3b8;
+   385→      font-weight: 600;
+   386→    }
+   387→    .block-head .lang {
+   388→      background: rgba(16,185,129,.15);
+   389→      color: #6ee7b7;
+   390→      padding: .15rem .5rem;
+   391→      border-radius: 999px;
+   392→      font-size: .7rem;
+   393→      font-weight: 600;
+   394→      letter-spacing: .03em;
+   395→    }
+   396→    .block-head .meta {
+   397→      color: #64748b;
+   398→      font-size: .75rem;
+   399→    }
+   400→    pre {
+   401→      margin: 0;
+   402→      padding: 1rem;
+   403→      overflow-x: auto;
+   404→      background: #0f172a;
+   405→    }
+   406→    code {
+   407→      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+   408→      font-size: .82rem;
+   409→      line-height: 1.6;
+   410→      color: #e2e8f0;
+   411→      white-space: pre;
+   412→    }
+   413→    .footer {
+   414→      margin-top: 2rem;
+   415→      padding-top: 1rem;
+   416→      border-top: 1px solid #334155;
+   417→      color: #64748b;
+   418→      font-size: .75rem;
+   419→      text-align: center;
+   420→    }
+   421→  </style>
+   422→</head>
+   423→<body>
+   424→  <div class="container">
+   425→    <h1>${escapeHtml(result.filename)}</h1>
+   426→    <p class="subtitle">${effectiveBlocks.length} blok kode · ${totalLines} baris · dihasilkan oleh CodeLooter</p>
+   427→${sections}
+   428→    <div class="footer">Diekspor dari CodeLooter — ${today}</div>
+   429→  </div>
+   430→</body>
+   431→</html>`;
+   432→
+   433→      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+   434→      const url = URL.createObjectURL(blob);
+   435→      const a = document.createElement("a");
+   436→      a.href = url;
+   437→      a.download = `${baseName}_blocks.html`;
+   438→      a.click();
+   439→      URL.revokeObjectURL(url);
+   440→      toast.success(`HTML dengan ${effectiveBlocks.length} blok dibuat`);
+   441→    } catch (e: any) {
+   442→      toast.error(e?.message ?? "Gagal membuat HTML");
+   443→    } finally {
+   444→      setExportingHtml(false);
+   445→    }
+   446→  };
+   447→
+   448→  // Build a structured JSON export containing the filename, file size, total
+   449→  // block count, an ISO timestamp of the export moment, the extraction
+   450→  // stats (when available) and the full per-block payload (index, language,
+   451→  // raw code, line count and the source/origin tag). The file is downloaded
+   452→  // client-side as a Blob (no round-trip to the server) and named
+   453→  // `${base}_export.json` so it doesn't collide with the txt/zip/html exports.
+   454→  // Loading state is kept symmetrical with the other export buttons even
+   455→  // though JSON serialization is effectively instant.
+   456→  const handleDownloadJson = () => {
+   457→    if (!result || effectiveBlocks.length === 0) return;
+   458→    setExportingJson(true);
+   459→    try {
+   460→      const payload = {
+   461→        filename: result.filename,
+   462→        fileSize: result.size,
+   463→        totalBlocks: effectiveBlocks.length,
+   464→        extractedAt: new Date().toISOString(),
+   465→        stats: result.stats ?? null,
+   466→        blocks: effectiveBlocks.map((b) => ({
+   467→          index: b.index,
+   468→          lang: b.lang,
+   469→          code: b.code,
+   470→          lines: b.lines,
+   471→          source: b.source,
+   472→        })),
+   473→      };
+   474→      const json = JSON.stringify(payload, null, 2);
+   475→      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+   476→      const url = URL.createObjectURL(blob);
+   477→      const a = document.createElement("a");
+   478→      a.href = url;
+   479→      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+   480→      a.download = `${base}_export.json`;
+   481→      a.click();
+   482→      URL.revokeObjectURL(url);
+   483→      toast.success(`JSON dengan ${effectiveBlocks.length} blok dibuat`);
+   484→    } catch (e: any) {
+   485→      toast.error(e?.message ?? "Gagal membuat JSON");
+   486→    } finally {
+   487→      setExportingJson(false);
+   488→    }
+   489→  };
+   490→
+   491→  const handleBlockDownload = (index: number) => {
+   492→    const b = effectiveBlocks.find((x) => x.index === index);
+   493→    if (!b) return;
+   494→    const ext =
+   495→      { r: "R", python: "py", sql: "sql", java: "java", cpp: "cpp", javascript: "js", typescript: "ts" }[b.lang] ?? "txt";
+   496→    const blob = new Blob([b.code], { type: "text/plain;charset=utf-8" });
+   497→    const url = URL.createObjectURL(blob);
+   498→    const a = document.createElement("a");
+   499→    a.href = url;
+   500→    a.download = `block_${index}.${ext}`;
+   501→    a.click();
+   502→    URL.revokeObjectURL(url);
+   503→  };
+   504→
+   505→  const handleBlockChange = (index: number, code: string) => {
+   506→    setBlocks((prev) => {
+   507→      const base = prev ?? result?.blocks ?? [];
+   508→      return base.map((b) => (b.index === index ? { ...b, code, lines: code.split("\n").length } : b));
+   509→    });
+   510→  };
+   511→
+   512→  // Override the auto-detected language of a single block. Same local-state
+   513→  // pattern as `handleBlockChange`: only the matching block's `lang` field
+   514→  // is replaced, the rest of the array is preserved. The new language is
+   515→  // reflected immediately in the header badge, the syntax highlighter, and
+   516→  // the per-block download extension.
+   517→  const handleBlockLangChange = (index: number, lang: string) => {
+   518→    setBlocks((prev) => {
+   519→      const base = prev ?? result?.blocks ?? [];
+   520→      return base.map((b) => (b.index === index ? { ...b, lang } : b));
+   521→    });
+   522→    toast.success(`Bahasa blok #${index} diubah ke ${lang}`);
+   523→  };
+   524→
+   525→  // Reorder blocks via drag-and-drop. The new order is committed to local
+   526→  // state and block indices are renumbered to match the new positions.
+   527→  const handleReorder = (reordered: CodeBlock[]) => {
+   528→    setBlocks(reordered.map((b, i) => ({ ...b, index: i })));
+   529→    toast.info("Urutan blok diperbarui");
+   530→  };
+   531→
+   532→  // Merge block at `index` with the next block. The two blocks' code is
+   533→  // concatenated with a newline, and indices are renumbered.
+   534→  const handleMergeWithNext = (index: number) => {
+   535→    setBlocks((prev) => {
+   536→      const base = prev ?? result?.blocks ?? [];
+   537→      const idx = base.findIndex((b) => b.index === index);
+   538→      if (idx < 0 || idx >= base.length - 1) return base;
+   539→      const merged = {
+   540→        ...base[idx],
+   541→        code: base[idx].code + "\n" + base[idx + 1].code,
+   542→        lines: base[idx].lines + base[idx + 1].lines,
+   543→        source: base[idx].source === base[idx + 1].source
+   544→          ? base[idx].source
+   545→          : `${base[idx].source}+merge`,
+   546→      };
+   547→      const next = [...base.slice(0, idx), merged, ...base.slice(idx + 2)];
+   548→      return next.map((b, i) => ({ ...b, index: i }));
+   549→    });
+   550→  };
+   551→
+   552→  // Split block at `index` into two blocks at line `atLine`. Lines 1..atLine-1
+   553→  // stay in the first block, lines atLine..end go to a new second block.
+   554→  const handleSplit = (index: number, atLine: number) => {
+   555→    setBlocks((prev) => {
+   556→      const base = prev ?? result?.blocks ?? [];
+   557→      const idx = base.findIndex((b) => b.index === index);
+   558→      if (idx < 0) return base;
+   559→      const lines = base[idx].code.split("\n");
+   560→      if (atLine < 2 || atLine >= lines.length) return base;
+   561→      const firstCode = lines.slice(0, atLine).join("\n");
+   562→      const secondCode = lines.slice(atLine).join("\n");
+   563→      const first = { ...base[idx], code: firstCode, lines: firstCode.split("\n").length };
+   564→      const second = { ...base[idx], code: secondCode, lines: secondCode.split("\n").length, source: "split" };
+   565→      const next = [...base.slice(0, idx), first, second, ...base.slice(idx + 1)];
+   566→      return next.map((b, i) => ({ ...b, index: i }));
+   567→    });
+   568→  };
+   569→
+   570→  // Delete block at `index`. Indices are renumbered.
+   571→  const handleDelete = (index: number) => {
+   572→    setBlocks((prev) => {
+   573→      const base = prev ?? result?.blocks ?? [];
+   574→      const next = base.filter((b) => b.index !== index);
+   575→      return next.map((b, i) => ({ ...b, index: i }));
+   576→    });
+   577→  };
+   578→
+   579→  // Duplicate block at `index`. The copy is inserted right after the original.
+   580→  const handleDuplicate = (index: number) => {
+   581→    setBlocks((prev) => {
+   582→      const base = prev ?? result?.blocks ?? [];
+   583→      const idx = base.findIndex((b) => b.index === index);
+   584→      if (idx < 0) return base;
+   585→      const copy = { ...base[idx], source: "duplicate" };
+   586→      const next = [...base.slice(0, idx + 1), copy, ...base.slice(idx + 1)];
+   587→      return next.map((b, i) => ({ ...b, index: i }));
+   588→    });
+   589→  };
+   590→
+   591→  const handleCopyAll = async () => {
+   592→    const body = effectiveBlocks.map((b) => b.code).join("\n\n");
+   593→    try {
+   594→      await navigator.clipboard.writeText(body);
+   595→      setCopiedAll(true);
+   596→      setTimeout(() => setCopiedAll(false), 1500);
+   597→      toast.success(`${effectiveBlocks.length} blok disalin ke clipboard`);
+   598→    } catch {
+   599→      toast.error("Gagal menyalin");
+   600→    }
+   601→  };
+   602→
+   603→  // Copy all blocks to clipboard as Markdown fenced code blocks,
+   604→  // each preceded by an HTML comment header with index / language / line count.
+   605→  // Example output:
+   606→  //   <!-- Block #0 | r | 5 lines -->
+   607→  //   ```r
+   608→  //   library(ggplot2)
+   609→  //   ```
+   610→  const handleCopyMarkdown = async () => {
+   611→    const body = effectiveBlocks
+   612→      .map(
+   613→        (b) =>
+   614→          `<!-- Block #${b.index} | ${b.lang} | ${b.lines} lines -->\n\`\`\`${b.lang}\n${b.code}\n\`\`\``,
+   615→      )
+   616→      .join("\n\n");
+   617→    try {
+   618→      await navigator.clipboard.writeText(body);
+   619→      setCopiedMd(true);
+   620→      setTimeout(() => setCopiedMd(false), 1500);
+   621→      toast.success(`${effectiveBlocks.length} blok disalin sebagai Markdown`);
+   622→    } catch {
+   623→      toast.error("Gagal menyalin");
+   624→    }
+   625→  };
+   626→
+   627→  // Language distribution for the summary bar.
+   628→  const langDist = effectiveBlocks.reduce<Record<string, number>>((acc, b) => {
+   629→    acc[b.lang] = (acc[b.lang] || 0) + 1;
+   630→    return acc;
+   631→  }, {});
+   632→  const totalLines = effectiveBlocks.reduce((sum, b) => sum + b.lines, 0);
+   633→  const totalChars = effectiveBlocks.reduce((sum, b) => sum + b.code.length, 0);
+   634→
+   635→  // ── Multi-select handlers ───────────────────────────────────────────────
+   636→  // Selected blocks are keyed by their `index` field (the same key every
+   637→  // other per-block handler uses). When blocks are merged/split/deleted we
+   638→  // renumber indices — to keep the selection in sync we rebuild the set
+   639→  // from the surviving block identities in those handlers (see handleBulkDelete
+   640→  // below; merge/split/duplicate intentionally leave the selection alone
+   641→  // because the underlying indices shift and the user can simply re-pick).
+   642→  const toggleSelect = (index: number) =>
+   643→    setSelectedIndices((prev) => {
+   644→      const next = new Set(prev);
+   645→      if (next.has(index)) {
+   646→        next.delete(index);
+   647→      } else {
+   648→        next.add(index);
+   649→      }
+   650→      return next;
+   651→    });
+   652→
+   653→  const selectAll = () =>
+   654→    setSelectedIndices(new Set(effectiveBlocks.map((b) => b.index)));
+   655→
+   656→  const deselectAll = () => {
+   657→    setSelectedIndices(new Set());
+   658→    setConfirmBulkDelete(false);
+   659→  };
+   660→
+   661→  // When every effective block is selected the toggle button offers
+   662→  // "Kosongkan" (clear); otherwise it offers "Pilih semua" (select all).
+   663→  const allSelected =
+   664→    effectiveBlocks.length > 0 && selectedIndices.size === effectiveBlocks.length;
+   665→
+   666→  // Copy the code of every selected block to the clipboard, separated by
+   667→  // a blank line so blocks stay visually distinct when pasted into an editor.
+   668→  const handleBulkCopy = async () => {
+   669→    const selected = effectiveBlocks.filter((b) => selectedIndices.has(b.index));
+   670→    if (selected.length === 0) return;
+   671→    const body = selected.map((b) => b.code).join("\n\n");
+   672→    try {
+   673→      await navigator.clipboard.writeText(body);
+   674→      setBulkCopied(true);
+   675→      setTimeout(() => setBulkCopied(false), 1500);
+   676→      toast.success(`${selected.length} blok disalin ke clipboard`);
+   677→    } catch {
+   678→      toast.error("Gagal menyalin");
+   679→    }
+   680→  };
+   681→
+   682→  // Bulk delete — two-click confirm pattern (mirrors CodeBlockCard). The
+   683→  // first click arms the button (rose tint + "Konfirmasi?" label); a
+   684→  // second click within 3s commits the delete. After the delete we clear
+   685→  // the selection set entirely because all referenced indices are gone.
+   686→  const handleBulkDeleteClick = () => {
+   687→    if (confirmBulkDelete) {
+   688→      const count = selectedIndices.size;
+   689→      setBlocks((prev) => {
+   690→        const base = prev ?? result?.blocks ?? [];
+   691→        const next = base.filter((b) => !selectedIndices.has(b.index));
+   692→        return next.map((b, i) => ({ ...b, index: i }));
+   693→      });
+   694→      setSelectedIndices(new Set());
+   695→      setConfirmBulkDelete(false);
+   696→      toast.success(`${count} blok dihapus`);
+   697→    } else {
+   698→      setConfirmBulkDelete(true);
+   699→      setTimeout(() => setConfirmBulkDelete(false), 3000);
+   700→    }
+   701→  };
+   702→
+   703→  // Build a ZIP containing only the selected blocks. Mirrors handleDownloadZip
+   704→  // but filters `effectiveBlocks` by `selectedIndices` first and writes the
+   705→  // archive as `{base}_selected.zip` to distinguish it from the all-blocks ZIP.
+   706→  const handleBulkZip = async () => {
+   707→    if (!result) return;
+   708→    const selected = effectiveBlocks.filter((b) => selectedIndices.has(b.index));
+   709→    if (selected.length === 0) return;
+   710→    setBulkZipping(true);
+   711→    try {
+   712→      const JSZip = (await import("jszip")).default;
+   713→      const zip = new JSZip();
+   714→      const used = new Map<string, number>();
+   715→      for (const b of selected) {
+   716→        const ext = extForLang(b.lang);
+   717→        let name = `block_${b.index}.${ext}`;
+   718→        if (used.has(name)) {
+   719→          const n = used.get(name)! + 1;
+   720→          used.set(name, n);
+   721→          name = `block_${b.index}_${n}.${ext}`;
+   722→        } else {
+   723→          used.set(name, 0);
+   724→        }
+   725→        zip.file(name, b.code);
+   726→      }
+   727→      const blob = await zip.generateAsync({
+   728→        type: "blob",
+   729→        compression: "DEFLATE",
+   730→        compressionOptions: { level: 6 },
+   731→      });
+   732→      const url = URL.createObjectURL(blob);
+   733→      const a = document.createElement("a");
+   734→      a.href = url;
+   735→      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+   736→      a.download = `${base}_selected.zip`;
+   737→      a.click();
+   738→      URL.revokeObjectURL(url);
+   739→      toast.success(`ZIP dengan ${selected.length} file dibuat`);
+   740→    } catch (e: any) {
+   741→      toast.error(e?.message ?? "Gagal membuat ZIP");
+   742→    } finally {
+   743→      setBulkZipping(false);
+   744→    }
+   745→  };
+   746→
+   747→  if (loading) {
+   748→    return <LoadingSkeleton />;
+   749→  }
+   750→
+   751→  if (!result) {
+   752→    return (
+   753→      <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
+   754→        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+   755→          <Code2 className="h-7 w-7" />
+   756→        </div>
+   757→        <p className="text-sm font-medium">Hasil ekstraksi akan muncul di sini</p>
+   758→        <p className="max-w-xs text-xs text-muted-foreground">
+   759→          Upload file praktikum / paper, pilih bahasa, lalu klik{" "}
+   760→          <span className="font-mono text-emerald-600 dark:text-emerald-400">Ekstrak kode</span>.
+   761→        </p>
+   762→      </div>
+   763→    );
+   764→  }
+   765→
+   766→  return (
+   767→    <div className="flex flex-col gap-4">
+   768→      {/* File header */}
+   769→      <motion.div
+   770→        initial={{ opacity: 0, y: -8 }}
+   771→        animate={{ opacity: 1, y: 0 }}
+   772→        transition={{ duration: 0.25 }}
+   773→        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm"
+   774→      >
+   775→        <div className="flex items-start gap-3">
+   776→          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+   777→            <FileText className="h-5 w-5" />
+   778→          </div>
+   779→          <div className="min-w-0 flex-1">
+   780→            <p className="truncate font-mono text-sm font-semibold">{result.filename}</p>
+   781→            <p className="text-xs text-muted-foreground">
+   782→              {(result.size / 1024).toFixed(1)} KB · {result.total} blok kode · {totalLines} baris · {totalChars.toLocaleString()} karakter
+   783→            </p>
+   784→          </div>
+   785→          <div className="flex shrink-0 gap-2">
+   786→            <Button
+   787→              size="sm"
+   788→              variant="ghost"
+   789→              onClick={handleCopyAll}
+   790→              disabled={effectiveBlocks.length === 0}
+   791→              title="Salin semua blok"
+   792→            >
+   793→              {copiedAll ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+   794→              <span className="hidden sm:inline">Salin semua</span>
+   795→            </Button>
+   796→            <Button
+   797→              size="sm"
+   798→              variant="ghost"
+   799→              onClick={handleCopyMarkdown}
+   800→              disabled={effectiveBlocks.length === 0}
+   801→              title="Salin semua blok sebagai Markdown"
+   802→            >
+   803→              {copiedMd ? <Check className="h-4 w-4 text-emerald-600" /> : <ClipboardCopy className="h-4 w-4" />}
+   804→              <span className="hidden sm:inline">Markdown</span>
+   805→            </Button>
+   806→            <Button
+   807→              size="sm"
+   808→              variant="outline"
+   809→              onClick={handleDownloadAll}
+   810→              disabled={effectiveBlocks.length === 0}
+   811→            >
+   812→              <Download className="h-4 w-4" />
+   813→              <span className="hidden sm:inline">Download</span>
+   814→            </Button>
+   815→            <Button
+   816→              size="sm"
+   817→              variant="outline"
+   818→              onClick={handleDownloadZip}
+   819→              disabled={effectiveBlocks.length === 0 || zipping}
+   820→              title="Download semua blok sebagai file ZIP terpisah"
+   821→            >
+   822→              {zipping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />}
+   823→              <span className="hidden sm:inline">{zipping ? "Zipping…" : "ZIP"}</span>
+   824→            </Button>
+   825→            <Button
+   826→              size="sm"
+   827→              variant="outline"
+   828→              onClick={handleDownloadHtml}
+   829→              disabled={effectiveBlocks.length === 0 || exportingHtml}
+   830→              title="Download semua blok sebagai file HTML syntax-highlighted"
+   831→            >
+   832→              {exportingHtml ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCode2 className="h-4 w-4" />}
+   833→              <span className="hidden sm:inline">{exportingHtml ? "Membuat…" : "HTML"}</span>
+   834→            </Button>
+   835→            <Button
+   836→              size="sm"
+   837→              variant="outline"
+   838→              onClick={handleDownloadJson}
+   839→              disabled={effectiveBlocks.length === 0 || exportingJson}
+   840→              title="Download semua blok + metadata sebagai file JSON terstruktur"
+   841→            >
+   842→              {exportingJson ? <Loader2 className="h-4 w-4 animate-spin" /> : <Braces className="h-4 w-4" />}
+   843→              <span className="hidden sm:inline">{exportingJson ? "Membuat…" : "JSON"}</span>
+   844→            </Button>
+   845→            {/* Comparison view toggle — only show if removedLines exist */}
+   846→            {result.stats?.removedLines && result.stats.removedLines.length > 0 && (
+   847→              <Button
+   848→                size="sm"
+   849→                variant={viewMode === "comparison" ? "default" : "outline"}
+   850→                onClick={() => setViewMode((v) => v === "comparison" ? "extracted" : "comparison")}
+   851→                title="Bandingkan kode yang diekstrak vs baris yang dihapus"
+   852→                className={viewMode === "comparison" ? "bg-rose-600 hover:bg-rose-700" : ""}
+   853→              >
+   854→                <GitCompare className="h-4 w-4" />
+   855→                <span className="hidden sm:inline">Bandingkan</span>
+   856→              </Button>
+   857→            )}
+   858→            {/* Reorder toggle — only in extracted view */}
+   859→            {viewMode === "extracted" && effectiveBlocks.length > 1 && (
+   860→              <Button
+   861→                size="sm"
+   862→                variant={reorderMode ? "default" : "outline"}
+   863→                onClick={() => setReorderMode((r) => !r)}
+   864→                title={reorderMode ? "Selesai mengurutkan" : "Urutkan ulang blok (drag & drop)"}
+   865→                className={reorderMode ? "bg-teal-600 hover:bg-teal-700" : ""}
+   866→              >
+   867→                <ArrowUpDown className="h-4 w-4" />
+   868→                <span className="hidden sm:inline">{reorderMode ? "Selesai" : "Urutkan"}</span>
+   869→              </Button>
+   870→            )}
+   871→            <Button
+   872→              size="sm"
+   873→              onClick={handleSave}
+   874→              disabled={saving || effectiveBlocks.length === 0}
+   875→              className="bg-emerald-600 hover:bg-emerald-700"
+   876→            >
+   877→              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+   878→              <span className="hidden sm:inline">Simpan</span>
+   879→            </Button>
+   880→            {currentSnippetId && onUpdateSnippet && (
+   881→              <Button
+   882→                size="sm"
+   883→                onClick={handleUpdate}
+   884→                disabled={updating || effectiveBlocks.length === 0}
+   885→                className="bg-amber-600 hover:bg-amber-700"
+   886→                title={`Perbarui snippet ini (${currentSnippetId.slice(0, 8)}) di tempat`}
+   887→              >
+   888→                {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+   889→                <span className="hidden sm:inline">{updating ? "Memperbarui…" : "Update"}</span>
+   890→              </Button>
+   891→            )}
+   892→          </div>
+   893→        </div>
+   894→        {/* Tag input — comma-separated tags attached to the snippet on
+   895→            save / update. Sits below the filename row (and above the
+   896→            language distribution badges) so it's always visible without
+   897→            scrolling. The Tag icon uses the emerald palette to match the
+   898→            rest of the header accents. */}
+   899→        <div className="flex items-center gap-2 border-t border-border/40 pt-2">
+   900→          <Tag className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+   901→          <Input
+   902→            type="text"
+   903→            value={tagInput}
+   904→            onChange={(e) => setTagInput(e.target.value)}
+   905→            placeholder="Tag (pisah dengan koma)..."
+   906→            aria-label="Tag snippet (pisah dengan koma)"
+   907→            className="h-8 text-xs"
+   908→          />
+   909→        </div>
+   910→        {/* Language distribution badges */}
+   911→        {effectiveBlocks.length > 0 && (
+   912→          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2">
+   913→            <span className="text-[11px] text-muted-foreground">Bahasa:</span>
+   914→            {Object.entries(langDist).map(([lang, count]) => (
+   915→              <span
+   916→                key={lang}
+   917→                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+   918→              >
+   919→                {lang} ×{count}
+   920→              </span>
+   921→            ))}
+   922→          </div>
+   923→        )}
+   924→        {result.stats && <StatsBar stats={result.stats} />}
+   925→        {result.stats && <StatsChart stats={result.stats} />}
+   926→      </motion.div>
+   927→
+   928→      {/* In-block search & language filter — sits between the file header
+   929→          card (which still reflects ALL blocks) and the blocks list. Only
+   930→          shown in the normal extracted view (not comparison, not reorder,
+   931→          not when there are zero blocks). The visible blocks list below
+   932→          renders `filteredBlocks` instead of `effectiveBlocks`, but every
+   933→          header stat / copy / zip / save action still operates on the full
+   934→          `effectiveBlocks` set. */}
+   935→      {viewMode === "extracted" && !reorderMode && effectiveBlocks.length > 0 && (
+   936→        <motion.div
+   937→          initial={{ opacity: 0, y: -4 }}
+   938→          animate={{ opacity: 1, y: 0 }}
+   939→          transition={{ duration: 0.2, ease: "easeOut" }}
+   940→          className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2"
+   941→        >
+   942→          <div className="relative min-w-[180px] flex-1">
+   943→            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   944→            <input
+   945→              type="text"
+   946→              value={searchQuery}
+   947→              onChange={(e) => setSearchQuery(e.target.value)}
+   948→              placeholder="Cari dalam blok kode..."
+   949→              aria-label="Cari dalam blok kode"
+   950→              className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-8 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
+   951→            />
+   952→            {searchQuery && (
+   953→              <button
+   954→                type="button"
+   955→                onClick={() => setSearchQuery("")}
+   956→                aria-label="Bersihkan pencarian"
+   957→                title="Bersihkan pencarian"
+   958→                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+   959→              >
+   960→                <X className="h-3.5 w-3.5" />
+   961→              </button>
+   962→            )}
+   963→          </div>
+   964→          <select
+   965→            value={langFilter}
+   966→            onChange={(e) => setLangFilter(e.target.value)}
+   967→            aria-label="Filter berdasarkan bahasa"
+   968→            title="Filter berdasarkan bahasa"
+   969→            className="h-8 shrink-0 rounded-md border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
+   970→          >
+   971→            <option value="all">Semua bahasa</option>
+   972→            {uniqueLangs.map((lang) => (
+   973→              <option key={lang} value={lang}>
+   974→                {lang}
+   975→              </option>
+   976→            ))}
+   977→          </select>
+   978→          {isFiltering && (
+   979→            <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
+   980→              {filteredBlocks.length} dari {effectiveBlocks.length} blok
+   981→            </span>
+   982→          )}
+   983→        </motion.div>
+   984→      )}
+   985→
+   986→      {/* Bulk action bar — only shown when at least one block is selected
+   987→          and we're not in comparison / reorder mode (those modes have their
+   988→          own focused UI). Slides down from the top via framer-motion. */}
+   989→      <AnimatePresence>
+   990→        {viewMode === "extracted" && !reorderMode && effectiveBlocks.length > 0 && selectedIndices.size > 0 && (
+   991→          <motion.div
+   992→            key="bulk-action-bar"
+   993→            initial={{ opacity: 0, y: -12 }}
+   994→            animate={{ opacity: 1, y: 0 }}
+   995→            exit={{ opacity: 0, y: -12 }}
+   996→            transition={{ duration: 0.2, ease: "easeOut" }}
+   997→            className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 shadow-md backdrop-blur"
+   998→          >
+   999→            <CheckSquare className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+  1000→            <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+  1001→              {selectedIndices.size} blok dipilih
+  1002→            </span>
+  1003→            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+  1004→              <Button
+  1005→                size="sm"
+  1006→                variant="ghost"
+  1007→                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+  1008→                onClick={() => (allSelected ? deselectAll() : selectAll())}
+  1009→                title={allSelected ? "Kosongkan pilihan" : "Pilih semua blok"}
+  1010→              >
+  1011→                {allSelected ? <Square className="h-3.5 w-3.5" /> : <CheckSquare className="h-3.5 w-3.5" />}
+  1012→                <span className="hidden sm:inline">{allSelected ? "Kosongkan" : "Pilih semua"}</span>
+  1013→              </Button>
+  1014→              <Button
+  1015→                size="sm"
+  1016→                variant="ghost"
+  1017→                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+  1018→                onClick={handleBulkCopy}
+  1019→                title="Salin blok terpilih ke clipboard"
+  1020→              >
+  1021→                {bulkCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+  1022→                <span className="hidden sm:inline">{bulkCopied ? "Tersalin" : "Salin"}</span>
+  1023→              </Button>
+  1024→              <Button
+  1025→                size="sm"
+  1026→                variant="ghost"
+  1027→                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+  1028→                onClick={handleBulkZip}
+  1029→                disabled={bulkZipping}
+  1030→                title="Download blok terpilih sebagai ZIP"
+  1031→              >
+  1032→                {bulkZipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileArchive className="h-3.5 w-3.5" />}
+  1033→                <span className="hidden sm:inline">{bulkZipping ? "Zipping…" : "ZIP"}</span>
+  1034→              </Button>
+  1035→              <Button
+  1036→                size="sm"
+  1037→                variant="ghost"
+  1038→                className={`h-7 px-2 text-xs transition-colors ${confirmBulkDelete ? "bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 dark:text-rose-400" : "text-emerald-700 hover:bg-rose-500/10 hover:text-rose-600 dark:text-emerald-300"}`}
+  1039→                onClick={handleBulkDeleteClick}
+  1040→                title={confirmBulkDelete ? "Klik lagi untuk konfirmasi hapus" : "Hapus blok terpilih"}
+  1041→              >
+  1042→                <Trash2 className="h-3.5 w-3.5" />
+  1043→                <span className="hidden sm:inline">{confirmBulkDelete ? "Konfirmasi?" : "Hapus"}</span>
+  1044→              </Button>
+  1045→              <Button
+  1046→                size="sm"
+  1047→                variant="ghost"
+  1048→                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+  1049→                onClick={deselectAll}
+  1050→                title="Keluar mode pilih"
+  1051→              >
+  1052→                <X className="h-3.5 w-3.5" />
+  1053→              </Button>
+  1054→            </div>
+  1055→          </motion.div>
+  1056→        )}
+  1057→      </AnimatePresence>
+  1058→
+  1059→      {/* Blocks or Comparison view */}
+  1060→      {viewMode === "comparison" && result.stats?.removedLines ? (
+  1061→        <ComparisonView blocks={effectiveBlocks} removedLines={result.stats.removedLines} />
+  1062→      ) : effectiveBlocks.length === 0 ? (
+  1063→        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
+  1064→          <Boxes className="mx-auto mb-2 h-8 w-8 text-amber-600" />
+  1065→          <p className="text-sm font-medium">Tidak ada blok kode terdeteksi</p>
+  1066→          <p className="mt-1 text-xs text-muted-foreground">
+  1067→            File mungkin berbasis gambar (perlu OCR) atau tidak memiliki marker kode.
+  1068→          </p>
+  1069→        </div>
+  1070→      ) : reorderMode ? (
+  1071→        <SortableBlockList
+  1072→          blocks={effectiveBlocks}
+  1073→          onReorder={handleReorder}
+  1074→          onDownload={handleBlockDownload}
+  1075→          onChange={handleBlockChange}
+  1076→          onMergeWithNext={handleMergeWithNext}
+  1077→          onSplit={handleSplit}
+  1078→          onDelete={handleDelete}
+  1079→          onDuplicate={handleDuplicate}
+  1080→          onChangeLang={handleBlockLangChange}
+  1081→        />
+  1082→      ) : filteredBlocks.length === 0 ? (
+  1083→        // Empty state: the extraction produced blocks but the current
+  1084→        // search / language filter narrows the list to zero. Offer a
+  1085→        // one-click reset so the user doesn't have to find the search
+  1086→        // bar manually.
+  1087→        <motion.div
+  1088→          initial={{ opacity: 0, y: 8 }}
+  1089→          animate={{ opacity: 1, y: 0 }}
+  1090→          transition={{ duration: 0.2 }}
+  1091→          className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center"
+  1092→        >
+  1093→          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+  1094→            <Search className="h-6 w-6" />
+  1095→          </div>
+  1096→          <p className="text-sm font-medium">Tidak ada blok cocok dengan pencarian</p>
+  1097→          <p className="max-w-xs text-xs text-muted-foreground">
+  1098→            Coba ubah kata kunci atau filter bahasa, lalu cari lagi.
+  1099→          </p>
+  1100→          <Button
+  1101→            size="sm"
+  1102→            variant="outline"
+  1103→            className="border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+  1104→            onClick={() => {
+  1105→              setSearchQuery("");
+  1106→              setLangFilter("all");
+  1107→            }}
+  1108→          >
+  1109→            <X className="h-4 w-4" />
+  1110→            <span>Bersihkan pencarian</span>
+  1111→          </Button>
+  1112→        </motion.div>
+  1113→      ) : (
+  1114→        <AnimatePresence mode="popLayout">
+  1115→          {filteredBlocks.map((b, i) => (
+  1116→            <motion.div
+  1117→              key={`${result.filename}-${b.index}`}
+  1118→              layout
+  1119→              initial={{ opacity: 0, y: 12 }}
+  1120→              animate={{ opacity: 1, y: 0 }}
+  1121→              exit={{ opacity: 0, y: -8 }}
+  1122→              transition={{ duration: 0.2, delay: i * 0.04 }}
+  1123→            >
+  1124→              <CodeBlockCard
+  1125→                block={b}
+  1126→                onDownload={handleBlockDownload}
+  1127→                onChange={handleBlockChange}
+  1128→                onMergeWithNext={handleMergeWithNext}
+  1129→                onSplit={handleSplit}
+  1130→                onDelete={handleDelete}
+  1131→                onDuplicate={handleDuplicate}
+  1132→                onChangeLang={handleBlockLangChange}
+  1133→                selected={selectedIndices.has(b.index)}
+  1134→                onToggleSelect={toggleSelect}
+  1135→                // Hide the "merge with next" button only when this block
+  1136→                // is the truly last block in `effectiveBlocks` (not the
+  1137→                // last visible block) — that way filtering never hides a
+  1138→                // merge action that still has a valid target.
+  1139→                isLast={b.index === effectiveBlocks[effectiveBlocks.length - 1]?.index}
+  1140→              />
+  1141→            </motion.div>
+  1142→          ))}
+  1143→        </AnimatePresence>
+  1144→      )}
+  1145→    </div>
+  1146→  );
+  1147→}
+  1148→

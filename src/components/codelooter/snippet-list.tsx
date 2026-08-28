@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { History, Trash2, FileCode, Loader2, Clock, Search, X, Download, FileArchive, Tag } from "lucide-react";
+import { History, Trash2, FileCode, Loader2, Clock, Search, X, Download, FileArchive, Tag, CopyPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import {
   getSnippet,
   downloadSnippetUrl,
   downloadSnippetZipUrl,
+  duplicateSnippet,
   type SnippetMeta,
   type SnippetDetail,
 } from "@/lib/codelooter-api";
@@ -49,6 +50,10 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
   const [snippets, setSnippets] = useState<SnippetMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Separate loading flag for the per-row duplicate action so the spinner
+  // shows on the duplicate button itself without clobbering the row's
+  // select spinner (which uses `busyId`).
+  const [dupingId, setDupingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const load = async () => {
@@ -101,6 +106,26 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
       toast.error("Gagal memuat snippet");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  // Clone an existing snippet into a new record. On success we refresh the
+  // local list (so the new row appears immediately) and toast the new id.
+  const handleDuplicate = async (s: SnippetMeta, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDupingId(s.id);
+    try {
+      const dup = await duplicateSnippet(s.id);
+      toast.success(
+        `Snippet diduplikasi · ${dup.id.slice(0, 8)} (${dup.totalBlocks} bl)`,
+      );
+      // Refresh the local list so the new snippet row appears at the top
+      // (createdAt = now, so it sorts first).
+      await load();
+    } catch {
+      toast.error("Gagal menduplikasi snippet");
+    } finally {
+      setDupingId(null);
     }
   };
 
@@ -218,6 +243,20 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
               >
                 <FileArchive className="h-3.5 w-3.5" />
               </a>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400"
+                onClick={(e) => handleDuplicate(s, e)}
+                disabled={dupingId === s.id}
+                title="Duplikasi snippet"
+              >
+                {dupingId === s.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CopyPlus className="h-3.5 w-3.5" />
+                )}
+              </Button>
               <Button
                 size="icon"
                 variant="ghost"

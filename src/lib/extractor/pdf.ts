@@ -34,5 +34,6 @@ function emptyStats(): PatternExtractStats {
   return {
     rawBlocks: 0, mergedBlocks: 0,
     strippedROutput: 0, repairedWraps: 0, filteredNarasi: 0,
+    removedLines: [],
   };
 }

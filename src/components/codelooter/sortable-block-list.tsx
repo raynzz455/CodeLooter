@@ -31,6 +31,10 @@ interface SortableBlockListProps {
   onDelete?: (index: number) => void;
   onDuplicate?: (index: number) => void;
   onChangeLang?: (index: number, lang: string) => void;
+  // Bookmark toggle forwarded to each CodeBlockCard so the star button is
+  // available in reorder mode too (the handler is owned by ResultPanel so
+  // the same local-state mutation path is used regardless of view).
+  onToggleBookmark?: (index: number) => void;
 }
 
 // A single sortable wrapper that adds a drag handle to each CodeBlockCard.
@@ -43,6 +47,7 @@ function SortableItem({
   onDelete,
   onDuplicate,
   onChangeLang,
+  onToggleBookmark,
   isLast,
 }: {
   block: CodeBlock;
@@ -53,6 +58,7 @@ function SortableItem({
   onDelete?: (index: number) => void;
   onDuplicate?: (index: number) => void;
   onChangeLang?: (index: number, lang: string) => void;
+  onToggleBookmark?: (index: number) => void;
   isLast?: boolean;
 }) {
   const {
@@ -93,6 +99,7 @@ function SortableItem({
           onDelete={onDelete}
           onDuplicate={onDuplicate}
           onChangeLang={onChangeLang}
+          onToggleBookmark={onToggleBookmark}
           isLast={isLast}
         />
       </div>
@@ -110,6 +117,7 @@ export function SortableBlockList({
   onDelete,
   onDuplicate,
   onChangeLang,
+  onToggleBookmark,
 }: SortableBlockListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -157,6 +165,7 @@ export function SortableBlockList({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onChangeLang={onChangeLang}
+              onToggleBookmark={onToggleBookmark}
               isLast={i === blocks.length - 1}
             />
           ))}

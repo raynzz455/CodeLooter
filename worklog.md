@@ -913,3 +913,130 @@ Stage Summary:
   3. Add snippet folders/categories (beyond flat tags)
   4. Add "recently used tags" autocomplete in tag input
   5. Add block bookmarking (mark important blocks for quick access)
+
+---
+Task ID: 10-a
+Agent: full-stack-developer
+Task: Add block bookmarking (mark important blocks for quick access)
+
+Work Log:
+- Read prior worklog entries (Tasks 1–9) and the four target files: `src/lib/codelooter-api.ts`, `src/components/codelooter/code-block-card.tsx`, `src/components/codelooter/result-panel.tsx`, `src/components/codelooter/sortable-block-list.tsx`. Also inspected the snippet API routes (`/api/snippets` + `/api/snippets/[id]`) and confirmed they already round-trip `blocksJson` verbatim — so a new `bookmarked` field on `CodeBlock` persists with the snippet on Save and on Update with zero API changes.
+- **`src/lib/codelooter-api.ts`** — added `bookmarked?: boolean` to the `CodeBlock` interface (after `source`), with a doc comment explaining that the extraction pipeline doesn't set it (only the UI does), that it's persisted via the existing `blocksJson` round-trip, and that `undefined` and `false` are treated the same way (not bookmarked) by all consumers.
+- **`src/components/codelooter/code-block-card.tsx`**:
+  - Added `Star` to the lucide-react import list.
+  - Added `onToggleBookmark?: (index: number) => void` to `CodeBlockCardProps` with a doc comment.
+  - Added `onToggleBookmark` to the destructure list of the component signature.
+  - Rendered a new bookmark toggle button in the header, placed between the collapse chevron and the `#{block.index}` span (per spec). The button is only rendered when `onToggleBookmark` is provided. On click: `e.stopPropagation()` then `onToggleBookmark(block.index)`. The `Star` icon uses `fill-amber-400 text-amber-400` (filled amber) when `block.bookmarked` is true and `text-muted-foreground` (outline) otherwise — applied via conditional class on both the button (`text-amber-400 hover:text-amber-500` vs `text-muted-foreground hover:text-foreground`) and the icon (`fill-amber-400` vs `fill-none`). Includes `aria-pressed`, `aria-label`, and `title` for accessibility (Indonesian labels: "Hapus bookmark" / "Tandai blok penting").
+- **`src/components/codelooter/sortable-block-list.tsx`**:
+  - Added `onToggleBookmark?: (index: number) => void` to `SortableBlockListProps` (with a doc comment explaining the handler is owned by ResultPanel so the same local-state mutation path is used regardless of view).
+  - Added `onToggleBookmark` to the `SortableItem` props + destructure list.
+  - Forwarded `onToggleBookmark={onToggleBookmark}` to the inner `<CodeBlockCard>` inside `SortableItem`.
+  - Added `onToggleBookmark` to the public `SortableBlockList` destructure list and forwarded it to each `<SortableItem>` in the map.
+- **`src/components/codelooter/result-panel.tsx`**:
+  - Added `Star` to the lucide-react import list.
+  - Added `bookmarkedOnly` state (`useState(false)`) next to the existing `searchQuery` / `langFilter` state, with a doc comment.
+  - Reset `bookmarkedOnly` to `false` inside the existing `useEffect([result])` reset block (alongside `setSearchQuery("")` and `setLangFilter("all")`) so a stale filter from a previous file doesn't bleed into a newly-loaded result.
+  - Extended the `filteredBlocks` computation: added `const matchesBookmark = !bookmarkedOnly || b.bookmarked === true;` and AND-combined it with the existing `matchesText` and `matchesLang`. Updated the doc comment to mention the third condition. Updated `isFiltering` to also include `|| bookmarkedOnly` so the "N dari M blok" counter shows when the bookmark filter is active even with an empty search query.
+  - Added `handleToggleBookmark(index)` handler that uses the same local-state mutation pattern as `handleBlockChange`: `setBlocks(prev => base.map(b => b.index === index ? { ...b, bookmarked: !b.bookmarked } : b))`. After the state update, looks up the block's pre-flip state in `effectiveBlocks` and shows `toast.info(...)` — "Blok ditandai" if it was previously not bookmarked (i.e. now is), "Bookmark dihapus" otherwise. Doc comment explains the persistence path (saveSnippet / updateSnippet send the full `effectiveBlocks` array as JSON, and the API routes round-trip the blocks JSON verbatim).
+  - Added a bookmark filter toggle button to the search bar, placed next to the language filter `<select>` (per spec — "next to the language filter dropdown"). Uses the `Star` icon. When active (`bookmarkedOnly === true`): emerald background (`border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600`) with a white filled star. When inactive: muted outline (`border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground`) with `fill-none`. Click toggles `bookmarkedOnly`. Includes `aria-pressed`, `aria-label`, `title` (Indonesian labels: "Hanya blok di-bookmark" / "Tampilkan semua blok"). Hidden "Bookmark" label on small screens (`hidden sm:inline`) to match the responsive behavior of the other header buttons.
+  - Updated the empty-state "Bersihkan pencarian" button to also reset `setBookmarkedOnly(false)` so a one-click reset clears all three filter dimensions.
+  - Passed `onToggleBookmark={handleToggleBookmark}` to `<CodeBlockCard>` in the normal `AnimatePresence` blocks list.
+  - Passed `onToggleBookmark={handleToggleBookmark}` to `<SortableBlockList>` in the reorder-mode view.
+- **Verification**:
+  - `bun run lint` → exit code 0 ✓ (zero errors, zero warnings).
+  - Dev server log shows clean compile (Next.js 16.1.3 webpack), no errors.
+
+Stage Summary:
+- CodeLooter now supports per-block bookmarking for quick access to important code (e.g. the key formula or the main model in a paper / module PDF). The feature is fully wired through four files (`codelooter-api.ts`, `code-block-card.tsx`, `sortable-block-list.tsx`, `result-panel.tsx`) with no API changes required — bookmarks persist with the snippet when saved via the existing `blocksJson` round-trip.
+- **CodeBlock type**: new optional `bookmarked?: boolean` field on the `CodeBlock` interface.
+- **CodeBlockCard**: a new bookmark button (lucide `Star` icon) sits in the header between the collapse chevron and the `#{index}` span. Visual state is driven by `block.bookmarked`: filled amber star (`fill-amber-400 text-amber-400`) when bookmarked, muted outline star otherwise. Click calls `onToggleBookmark(block.index)` with `e.stopPropagation()`. New optional `onToggleBookmark?: (index: number) => void` prop.
+- **SortableBlockList**: new optional `onToggleBookmark?: (index: number) => void` prop forwarded through `SortableItem` to the inner `CodeBlockCard`, so the star toggle is available in reorder mode too (same handler, same local-state mutation path).
+- **ResultPanel**: `handleToggleBookmark(index)` flips the matching block's `bookmarked` field in local state and shows a toast ("Blok ditandai" / "Bookmark dihapus"). Passed to both the normal `AnimatePresence` cards list and the `SortableBlockList` reorder view. A new "Bookmark" filter toggle button (emerald when active) sits in the search bar next to the language filter dropdown; when active, `filteredBlocks` is narrowed to blocks with `b.bookmarked === true` (AND-combined with the existing text + language filters). The filter state is reset on new result and is also cleared by the empty-state "Bersihkan pencarian" button.
+- **Color palette**: amber for the per-block bookmark star (filled state), emerald for the active filter toggle — no blue or indigo introduced. All bookmarks persist with the snippet when saved or updated (the existing `saveSnippet` / `updateSnippet` paths send the full `effectiveBlocks` array as JSON, and the API routes round-trip the blocks JSON verbatim, so `bookmarked` survives the round-trip with zero API / schema changes).
+- `bun run lint` passes with zero errors. Dev server log shows clean compile. No test code written (per project rules).
+
+---
+Task ID: 10-b
+Agent: full-stack-developer
+Task: Add recently used tags autocomplete + snippet duplicate
+
+Work Log:
+- Read worklog.md (Tasks 1-9 done) and the existing result-panel.tsx, snippet-list.tsx, codelooter-api.ts, snippets API routes to understand the current tag-input UI and snippet CRUD shape.
+- Created `src/lib/tag-history.ts` — a Zustand store holding an in-memory list of up to 20 recently-used tags (most-recent-first, deduplicated case-insensitively). `addTag()` accepts a comma-separated string, splits & trims entries, prepends them, dedupes, and caps at 20. Exposed via `useTagHistory` hook plus `useTagHistory.getState()` for non-React callers (used by ResultPanel after save/update).
+- Created `src/components/codelooter/tag-input.tsx` — a controlled TagInput component (`value` / `onChange` / `onCommit`). Renders a `Tag`-icon Input above a row of "Terbaru:" badges built from the Zustand store. Clicking a badge appends that tag to the current value (with a comma separator) when it isn't already present; already-present tags are filtered out so the row only offers useful suggestions. Commits on blur and Enter, and a badge click also triggers an implicit commit so the new tag lands in history immediately. Badges use `bg-emerald-500/10 text-emerald-700 dark:text-emerald-300` and `text-[10px]` per spec.
+- Modified `src/components/codelooter/result-panel.tsx`:
+  - Replaced the inline tag Input div with `<TagInput value={tagInput} onChange={setTagInput} onCommit={() => useTagHistory.getState().addTag(tagInput)} />`.
+  - Added `useTagHistory.getState().addTag(tagInput)` calls after the successful `saveSnippet` (in `handleSave`) and after `onUpdateSnippet` resolves (in `handleUpdate`), so every persisted snippet records its tags into the recent-history.
+  - Removed the now-unused `Input` and `Tag` imports from the file.
+- Created `src/app/api/snippets/[id]/duplicate/route.ts` — a `POST` handler that finds the source snippet by id (404 if not found), copies `blocksJson` / `totalBlocks` / `fileSize` / `extractedLang` / `tags` into a new record, and appends " (copy)" to `originalFilename`. A second duplicate of a " (copy)" filename keeps the single " (copy)" suffix rather than stacking (idempotent naming). Returns `{ id, totalBlocks }`.
+- Added `duplicateSnippet(id)` helper to `src/lib/codelooter-api.ts` (POST `/api/snippets/[id}/duplicate`, returns `{ id, totalBlocks }`).
+- Modified `src/components/codelooter/snippet-list.tsx`:
+  - Added a per-row `CopyPlus` icon Button placed between the ZIP download link and the delete button.
+  - Added a separate `dupingId` state (kept distinct from `busyId` which tracks row select/delete) so the duplicate button shows its own `Loader2` spinner without clobbering the row's select spinner.
+  - `handleDuplicate(s, e)` stops propagation (so the row isn't selected), calls `duplicateSnippet`, toasts the new id + block count, and refreshes the local list via `load()` so the new row appears at the top (newest `createdAt`).
+- Ran `bun run lint` — passed with no errors.
+- Started dev server (the auto-run dev server was down at the time) and exercised the duplicate API end-to-end with curl:
+  - Created a snippet with tags "statistika, modul3" → got id `cmtcnl5n...`.
+  - `POST /api/snippets/{id}/duplicate` → 200, returned new id `cmtcnl8i...` with `totalBlocks: 1`.
+  - List showed both `test_dup.txt` (original) and `test_dup.txt (copy)` (clone) with identical tags and block counts.
+  - `POST /api/snippets/nonexistent-id/duplicate` → HTTP 404 as expected.
+  - Duplicating the duplicate kept the filename as `test_dup.txt (copy)` (no ` (copy) (copy)` stacking).
+  - Cleaned up the test snippets afterward so the user's list isn't polluted.
+
+Stage Summary:
+- Feature 1 (Recently Used Tags Autocomplete): a new Zustand store (`src/lib/tag-history.ts`) plus a new `TagInput` component (`src/components/codelooter/tag-input.tsx`) drop-in-replace the old tag Input in ResultPanel. Recent tags appear as small emerald badges below the input; clicking one appends it to the input; tags are recorded into the store on save, on update, on blur, on Enter, and on badge click. No blue/indigo colors used.
+- Feature 2 (Snippet Duplicate): a new `POST /api/snippets/[id]/duplicate` endpoint clones an existing snippet's blocks/size/lang/tags with a " (copy)" filename suffix; a new `duplicateSnippet` client helper and a per-row `CopyPlus` button in SnippetList invoke it, toast the result, and refresh the list locally with a per-button spinner.
+- Lint passes; duplicate API verified via curl (200 OK + correct payload, 404 for missing source, idempotent "(copy)" naming).
+
+---
+Task ID: 10
+Agent: webDevReview (cron round 9)
+Task: Block bookmarking + tags autocomplete + snippet duplicate + bug fixes.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-9) — Phase 1 extraction complete, search/filter + JSON export + tags added in Task 9.
+- Performed QA: lint passes, 9/9 extraction checks pass. Found TypeScript errors via `npx tsc --noEmit` that caused 500 errors on API routes:
+  1. `page.tsx`: `detail.filename` should be `detail.originalFilename` (SnippetDetail interface uses `originalFilename`).
+  2. `pdf.ts`: `emptyStats()` missing `removedLines: []` field (required by PatternExtractStats).
+  3. `batch/route.ts`: `results` array had no type annotation, causing `never[]` inference.
+  4. `download/route.ts`: `Buffer` type not assignable to `BodyInit` — changed `type: "nodebuffer"` to `type: "uint8array"`.
+  5. `page.tsx`: `e.target?.matches` type error — cast to `Element | null` first.
+- Fixed all TypeScript errors. Lint passes cleanly.
+
+- Added 3 new features from the Task 9 priority recommendations:
+
+**Feature 1: Block Bookmarking (Task 10-a, via subagent)**
+- Added `bookmarked?: boolean` to CodeBlock interface.
+- CodeBlockCard: Star icon button in header (between collapse chevron and index). Filled amber when bookmarked, outline when not. `e.stopPropagation()` on click.
+- ResultPanel: `handleToggleBookmark` handler updates local state. `bookmarkedOnly` filter toggle in search bar (emerald when active).
+- Passed through SortableBlockList for reorder mode.
+- Bookmarks persist via existing `blocksJson` round-trip (no schema change needed).
+
+**Feature 2: Recently Used Tags Autocomplete (Task 10-b, via subagent)**
+- Created Zustand store `tag-history.ts` (max 20 unique tags, most-recent-first).
+- Created `tag-input.tsx` component: Tag icon input + "Terbaru:" row of clickable emerald badges. Clicking a recent tag appends it (with comma separator) if not already present.
+- Replaced inline tag input in ResultPanel with TagInput. Commits tags to history on blur/Enter/save/update.
+
+**Feature 3: Snippet Duplicate (Task 10-b, via subagent)**
+- New `POST /api/snippets/[id]/duplicate` endpoint — clones snippet with " (copy)" filename suffix. Copies blocksJson, totalBlocks, fileSize, extractedLang, tags.
+- `duplicateSnippet(id)` client API helper.
+- SnippetList: CopyPlus icon button per row with loading spinner. Toast on success, list refreshes.
+
+- Verified:
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - TypeScript: `npx tsc --noEmit` passes for project files (only examples/skills have unrelated errors) ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports block bookmarking (star + filter), recently-used-tags autocomplete, and snippet duplication. All TypeScript errors fixed. Lint passes cleanly. 9/9 extraction checks pass.
+- **Completed modifications**: 3 new features (bookmarking + tags autocomplete + duplicate), 5 TypeScript bug fixes, 4 new files (tag-history.ts, tag-input.tsx, duplicate route, bookmark in code-block-card). Modified result-panel.tsx, snippet-list.tsx, codelooter-api.ts, page.tsx, pdf.ts, batch route, download route.
+- **Unresolved risks**:
+  - Dev server (both turbopack and webpack) had severe cache corruption issues this round — required multiple full clean restarts (removing .next, node_modules/.cache, .turbo). The `routes-manifest.json` file was not being generated, causing 500 errors. This appears to be an environment issue with the 4GB cgroup memory limit causing incomplete writes. Mitigation: full cache clean + restart.
+  - The server is currently running in webpack mode (`--webpack` flag) which is more memory-stable but slower to compile.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): OCR progress indicator, clear UI separation
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add snippet folders/categories (beyond flat tags)
+  4. Add block annotations/notes (user can add a note to a block)
+  5. Add "compare two snippets" feature (diff view)

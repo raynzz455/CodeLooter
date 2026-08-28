@@ -6,6 +6,13 @@ export interface CodeBlock {
   code: string;
   lines: number;
   source: string;
+  // When true, the user has starred this block as important for quick
+  // access (e.g. the key formula or main model). Optional because the
+  // extraction pipeline doesn't set it — only the UI does, and it
+  // persists with the snippet when saved (the API routes pass it
+  // through unchanged). Undefined and `false` are treated the same
+  // way (not bookmarked) by all consumers.
+  bookmarked?: boolean;
 }
 
 export interface ExtractStats {
@@ -141,6 +148,20 @@ export async function updateSnippet(
 export async function deleteSnippet(id: string): Promise<void> {
   const res = await fetch(`/api/snippets/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+// Duplicate an existing snippet: creates a new snippet record that copies
+// the source's blocksJson, totalBlocks, fileSize, extractedLang and tags,
+// with the originalFilename getting a " (copy)" suffix. Returns the new
+// snippet's id and totalBlocks so the caller can refresh / toast.
+export async function duplicateSnippet(
+  id: string,
+): Promise<{ id: string; totalBlocks: number }> {
+  const res = await fetch(`/api/snippets/${id}/duplicate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 export function downloadSnippetUrl(id: string, block = -1): string {

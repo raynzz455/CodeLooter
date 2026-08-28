@@ -186,7 +186,7 @@ export default function Home() {
     }));
     setResult({
       blocks,
-      filename: detail.filename,
+      filename: detail.originalFilename,
       size: detail.fileSize,
       total: detail.totalBlocks,
       stats: null,
@@ -199,7 +199,7 @@ export default function Home() {
     // Pre-populate the tag input with the snippet's existing tags so the
     // user can see / edit them before the next "Update".
     setCurrentTags(detail.tags);
-    toast.success(`Snippet "${detail.filename}" dimuat`);
+    toast.success(`Snippet "${detail.originalFilename}" dimuat`);
   }, []);
 
   // Push the ResultPanel's current editable blocks back to the *existing*
@@ -254,7 +254,8 @@ export default function Home() {
   // C copy all (when result exists), / focus search.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const inField = e.target?.matches?.("input,textarea,select");
+      const target = e.target as Element | null;
+      const inField = target?.matches?.("input,textarea,select") ?? false;
       if (e.key === "?" && !e.ctrlKey && !e.metaKey && !inField) {
         e.preventDefault();
         setShowShortcuts((s) => !s);

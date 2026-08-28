@@ -8,9 +8,19 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { extractFromFile, ALL_SUPPORTED_EXTS } from "@/lib/extractor";
+import type { CodeBlock, ExtractStats } from "@/lib/extractor/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+interface BatchResultItem {
+  filename: string;
+  blocks: CodeBlock[];
+  total: number;
+  size: number;
+  stats: ExtractStats | null;
+  error?: string;
+}
 
 export async function POST(req: NextRequest) {
   const form = await req.formData();
@@ -30,7 +40,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const results = [];
+  const results: BatchResultItem[] = [];
   const MAX_BYTES = 50 * 1024 * 1024;
 
   for (const file of files) {

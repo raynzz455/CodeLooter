@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus, CheckSquare, Square } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus, CheckSquare, Square, Star } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,14 @@ interface CodeBlockCardProps {
    * block's `index`. The handler in ResultPanel maintains a `Set<number>`.
    */
   onToggleSelect?: (index: number) => void;
+  /**
+   * Toggle this block's bookmark (star) state. Receives the block's
+   * `index`. The handler in ResultPanel flips `bookmarked` on the
+   * matching block in local state. The visual state is driven by
+   * `block.bookmarked` (filled amber star when true, muted outline star
+   * otherwise).
+   */
+  onToggleBookmark?: (index: number) => void;
   isLast?: boolean;
 }
 
@@ -126,7 +134,7 @@ export const TOKEN_CLASS: Record<string, string> = {
   nl: "",
 };
 
-export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, onChangeLang, selected, onToggleSelect, isLast }: CodeBlockCardProps) {
+export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, onChangeLang, selected, onToggleSelect, onToggleBookmark, isLast }: CodeBlockCardProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
@@ -229,6 +237,27 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
+        {/* Bookmark toggle — sits between the collapse chevron and the
+            index number. Star icon is filled amber when `block.bookmarked`
+            is true, muted outline otherwise. stopPropagation keeps the
+            click from bubbling up to the header (which would otherwise be
+            a no-op since the chevron is a sibling, but defensive — keeps
+            the click truly local). */}
+        {onToggleBookmark && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleBookmark(block.index);
+            }}
+            aria-pressed={!!block.bookmarked}
+            aria-label={block.bookmarked ? `Hapus bookmark blok #${block.index}` : `Bookmark blok #${block.index}`}
+            title={block.bookmarked ? "Hapus bookmark" : "Tandai blok penting"}
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent ${block.bookmarked ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Star className={`h-3.5 w-3.5 ${block.bookmarked ? "fill-amber-400" : "fill-none"}`} />
+          </button>
+        )}
         <span className="font-mono text-xs font-semibold text-muted-foreground">
           #{block.index}
         </span>

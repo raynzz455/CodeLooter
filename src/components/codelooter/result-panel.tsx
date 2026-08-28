@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Tag } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Star } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
 import { saveSnippet } from "@/lib/codelooter-api";
@@ -14,6 +13,8 @@ import { StatsChart } from "./stats-chart";
 import { LoadingSkeleton } from "./loading-skeleton";
 import { ComparisonView } from "./comparison-view";
 import { SortableBlockList } from "./sortable-block-list";
+import { TagInput } from "./tag-input";
+import { useTagHistory } from "@/lib/tag-history";
 
 interface ResultPanelProps {
   result: ExtractResult | null;
@@ -75,6 +76,12 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   // arrives so a stale query from a previous file doesn't bleed over.
   const [searchQuery, setSearchQuery] = useState("");
   const [langFilter, setLangFilter] = useState("all");
+  // Bookmark-only filter toggle. When true the visible blocks list is
+  // narrowed to blocks whose `bookmarked` field is `true`. Lives next to
+  // the language filter dropdown so the two filters can be combined
+  // (e.g. "show me only my starred R blocks"). Reset on new result so a
+  // stale filter from a previous file doesn't bleed over.
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);
 
   // Multi-select state for bulk operations (copy / delete / ZIP). The set
   // holds block `index` values — the same key used by every per-block
@@ -115,6 +122,8 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     // previous file doesn't bleed into the newly-loaded result.
     setSearchQuery("");
     setLangFilter("all");
+    // Reset the bookmark-only filter for the same reason.
+    setBookmarkedOnly(false);
     // Clear any active multi-select so stale selections don't bleed into
     // the newly-loaded result.
     setSelectedIndices(new Set());
@@ -143,9 +152,11 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   // ── In-block search & language filter ─────────────────────────────────
   // Text match is a case-insensitive substring search over `b.code`. The
   // language match is exact-equality against the dropdown value (or "all"
-  // to disable the language filter). Both conditions are AND-combined so a
-  // user searching "ggplot2" with the language set to "r" sees only R
-  // blocks whose code contains "ggplot2".
+  // to disable the language filter). The bookmark filter is a boolean AND
+  // on `b.bookmarked === true`. All three conditions are AND-combined so
+  // a user searching "ggplot2" with the language set to "r" and the
+  // bookmark filter on sees only starred R blocks whose code contains
+  // "ggplot2".
   //
   // NOTE: the file header card (total count, language distribution, line
   // totals, copy/zip/save buttons) still uses `effectiveBlocks` — those
@@ -156,9 +167,35 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   const filteredBlocks = effectiveBlocks.filter((b) => {
     const matchesText = trimmedQuery === "" || b.code.toLowerCase().includes(trimmedQuery);
     const matchesLang = langFilter === "all" || b.lang === langFilter;
-    return matchesText && matchesLang;
+    const matchesBookmark = !bookmarkedOnly || b.bookmarked === true;
+    return matchesText && matchesLang && matchesBookmark;
   });
-  const isFiltering = trimmedQuery !== "" || langFilter !== "all";
+  const isFiltering = trimmedQuery !== "" || langFilter !== "all" || bookmarkedOnly;
+
+  // Toggle the `bookmarked` flag on the block identified by `index`. Uses
+  // the same local-state mutation pattern as `handleBlockChange` — only
+  // the matching block is replaced (with `bookmarked` flipped), the rest
+  // of the array is preserved. The bookmark state persists with the
+  // snippet when saved because `saveSnippet` / `updateSnippet` send the
+  // full `effectiveBlocks` array (including `bookmarked`) as JSON, and the
+  // API routes round-trip the blocks JSON verbatim.
+  //
+  // The toast message reads from the block's *new* state — so we look it
+  // up *after* the flip is computed. `bookmarked` is treated as `false`
+  // when undefined, so toggling a block that has never been bookmarked
+  // sets it to `true`.
+  const handleToggleBookmark = (index: number) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      return base.map((b) =>
+        b.index === index ? { ...b, bookmarked: !b.bookmarked } : b,
+      );
+    });
+    // Look up the current (pre-flip) state for the toast — `effectiveBlocks`
+    // reflects the current render and `!b.bookmarked` matches the new state.
+    const current = effectiveBlocks.find((b) => b.index === index);
+    toast.info(current && !current.bookmarked ? "Blok ditandai" : "Bookmark dihapus");
+  };
 
   const handleSave = async () => {
     if (!result) return;
@@ -174,6 +211,9 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
         // server (default is "").
         tagInput.trim(),
       );
+      // Record the tags into the in-memory recently-used history so the
+      // TagInput's autocomplete row offers them on the next save.
+      useTagHistory.getState().addTag(tagInput);
       toast.success(`Snippet disimpan · ${saved.id.slice(0, 8)}`);
       // Adopt the freshly-created snippet as the current one so subsequent
       // edits can be pushed back via "Update" rather than re-saving a copy.
@@ -203,6 +243,9 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
       // updated alongside the code (the parent's PATCH handler accepts an
       // optional `tags` parameter).
       await onUpdateSnippet(currentSnippetId, effectiveBlocks, tagInput.trim());
+      // Record the tags into the in-memory recently-used history so the
+      // TagInput's autocomplete row offers them on the next edit.
+      useTagHistory.getState().addTag(tagInput);
     } finally {
       setUpdating(false);
     }
@@ -892,21 +935,15 @@ ${sections}
           </div>
         </div>
         {/* Tag input — comma-separated tags attached to the snippet on
-            save / update. Sits below the filename row (and above the
-            language distribution badges) so it's always visible without
-            scrolling. The Tag icon uses the emerald palette to match the
-            rest of the header accents. */}
-        <div className="flex items-center gap-2 border-t border-border/40 pt-2">
-          <Tag className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          <Input
-            type="text"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            placeholder="Tag (pisah dengan koma)..."
-            aria-label="Tag snippet (pisah dengan koma)"
-            className="h-8 text-xs"
-          />
-        </div>
+            save / update. Uses the TagInput component which renders a
+            row of recently-used tags below the input for one-click
+            autocomplete. The Tag icon uses the emerald palette to match
+            the rest of the header accents. */}
+        <TagInput
+          value={tagInput}
+          onChange={setTagInput}
+          onCommit={() => useTagHistory.getState().addTag(tagInput)}
+        />
         {/* Language distribution badges */}
         {effectiveBlocks.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2">
@@ -975,6 +1012,22 @@ ${sections}
               </option>
             ))}
           </select>
+          {/* Bookmark-only filter toggle — sits next to the language filter.
+              When active the button uses an emerald background (mirrors the
+              reorder / comparison toggle styling) and only blocks with
+              `bookmarked === true` are shown. Uses the Star icon so the
+              filter's meaning matches the per-block star toggle visually. */}
+          <button
+            type="button"
+            onClick={() => setBookmarkedOnly((v) => !v)}
+            aria-pressed={bookmarkedOnly}
+            aria-label={bookmarkedOnly ? "Tampilkan semua blok" : "Hanya blok di-bookmark"}
+            title={bookmarkedOnly ? "Tampilkan semua blok" : "Hanya blok di-bookmark"}
+            className={`flex h-8 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors ${bookmarkedOnly ? "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+          >
+            <Star className={`h-3.5 w-3.5 ${bookmarkedOnly ? "fill-white" : "fill-none"}`} />
+            <span className="hidden sm:inline">Bookmark</span>
+          </button>
           {isFiltering && (
             <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
               {filteredBlocks.length} dari {effectiveBlocks.length} blok
@@ -1078,6 +1131,7 @@ ${sections}
           onDelete={handleDelete}
           onDuplicate={handleDuplicate}
           onChangeLang={handleBlockLangChange}
+          onToggleBookmark={handleToggleBookmark}
         />
       ) : filteredBlocks.length === 0 ? (
         // Empty state: the extraction produced blocks but the current
@@ -1104,6 +1158,7 @@ ${sections}
             onClick={() => {
               setSearchQuery("");
               setLangFilter("all");
+              setBookmarkedOnly(false);
             }}
           >
             <X className="h-4 w-4" />
@@ -1130,6 +1185,7 @@ ${sections}
                 onDelete={handleDelete}
                 onDuplicate={handleDuplicate}
                 onChangeLang={handleBlockLangChange}
+                onToggleBookmark={handleToggleBookmark}
                 selected={selectedIndices.has(b.index)}
                 onToggleSelect={toggleSelect}
                 // Hide the "merge with next" button only when this block

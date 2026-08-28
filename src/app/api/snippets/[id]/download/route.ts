@@ -72,12 +72,12 @@ export async function GET(
       zip.file(name, b.code);
     }
     const zipBlob = await zip.generateAsync({
-      type: "nodebuffer",
+      type: "uint8array",
       compression: "DEFLATE",
       compressionOptions: { level: 6 },
     });
     const filename = `${base}_blocks.zip`;
-    return new NextResponse(zipBlob, {
+    return new NextResponse(zipBlob as Uint8Array, {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
