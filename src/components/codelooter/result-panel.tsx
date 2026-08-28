@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2 } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -17,12 +17,31 @@ import { SortableBlockList } from "./sortable-block-list";
 interface ResultPanelProps {
   result: ExtractResult | null;
   loading: boolean;
-  onSaved: () => void;
+  /**
+   * Called after a snippet is saved as a NEW record (existing behaviour).
+   * Receives the freshly-created snippet id so the parent can adopt it as
+   * the new `currentSnippetId` (allowing subsequent edits to update the
+   * same record in-place).
+   */
+  onSaved: (snippetId?: string) => void;
+  /**
+   * ID of the snippet currently loaded into the panel. When set, an extra
+   * "Update" button is rendered next to "Simpan" so the user can push
+   * their edits back to the same snippet record instead of creating a
+   * duplicate.
+   */
+  currentSnippetId?: string;
+  /**
+   * Invoked when the user clicks "Update". The parent performs the actual
+   * PATCH /api/snippets/[id] call, shows a toast, and refreshes the list.
+   */
+  onUpdateSnippet?: (id: string) => Promise<void> | void;
 }
 
-export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
+export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpdateSnippet }: ResultPanelProps) {
   const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedMd, setCopiedMd] = useState(false);
   const [zipping, setZipping] = useState(false);
@@ -70,11 +89,28 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
         result.size,
       );
       toast.success(`Snippet disimpan · ${saved.id.slice(0, 8)}`);
-      onSaved();
+      // Adopt the freshly-created snippet as the current one so subsequent
+      // edits can be pushed back via "Update" rather than re-saving a copy.
+      onSaved(saved.id);
     } catch (e: any) {
       toast.error(e?.message ?? "Gagal menyimpan");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Push the current editable blocks back to the *existing* snippet record
+  // (identified by `currentSnippetId`). The parent owns the actual API call
+  // (so it can also refresh the snippet list + show a toast) — this handler
+  // just toggles the loading state on the button and forwards the id.
+  const handleUpdate = async () => {
+    if (!currentSnippetId || !onUpdateSnippet) return;
+    if (effectiveBlocks.length === 0) return;
+    setUpdating(true);
+    try {
+      await onUpdateSnippet(currentSnippetId);
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -381,6 +417,27 @@ ${sections}
     });
   };
 
+  // Delete block at `index`. Indices are renumbered.
+  const handleDelete = (index: number) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      const next = base.filter((b) => b.index !== index);
+      return next.map((b, i) => ({ ...b, index: i }));
+    });
+  };
+
+  // Duplicate block at `index`. The copy is inserted right after the original.
+  const handleDuplicate = (index: number) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      const idx = base.findIndex((b) => b.index === index);
+      if (idx < 0) return base;
+      const copy = { ...base[idx], source: "duplicate" };
+      const next = [...base.slice(0, idx + 1), copy, ...base.slice(idx + 1)];
+      return next.map((b, i) => ({ ...b, index: i }));
+    });
+  };
+
   const handleCopyAll = async () => {
     const body = effectiveBlocks.map((b) => b.code).join("\n\n");
     try {
@@ -548,6 +605,18 @@ ${sections}
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               <span className="hidden sm:inline">Simpan</span>
             </Button>
+            {currentSnippetId && onUpdateSnippet && (
+              <Button
+                size="sm"
+                onClick={handleUpdate}
+                disabled={updating || effectiveBlocks.length === 0}
+                className="bg-amber-600 hover:bg-amber-700"
+                title={`Perbarui snippet ini (${currentSnippetId.slice(0, 8)}) di tempat`}
+              >
+                {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <span className="hidden sm:inline">{updating ? "Memperbarui…" : "Update"}</span>
+              </Button>
+            )}
           </div>
         </div>
         {/* Language distribution badges */}
@@ -587,6 +656,8 @@ ${sections}
           onChange={handleBlockChange}
           onMergeWithNext={handleMergeWithNext}
           onSplit={handleSplit}
+          onDelete={handleDelete}
+          onDuplicate={handleDuplicate}
         />
       ) : (
         <AnimatePresence mode="popLayout">
@@ -605,6 +676,8 @@ ${sections}
                 onChange={handleBlockChange}
                 onMergeWithNext={handleMergeWithNext}
                 onSplit={handleSplit}
+                onDelete={handleDelete}
+                onDuplicate={handleDuplicate}
                 isLast={i === effectiveBlocks.length - 1}
               />
             </motion.div>

@@ -108,6 +108,25 @@ export async function getSnippet(id: string): Promise<SnippetDetail> {
   return res.json();
 }
 
+// Update an existing snippet's blocks and language in-place via PATCH
+// /api/snippets/[id]. Used by the inline editor flow — the user edits a
+// previously-saved snippet in the ResultPanel and clicks "Update" to
+// persist the changes back to the same snippet record (rather than saving
+// a brand-new snippet). Returns the updated snippet detail.
+export async function updateSnippet(
+  id: string,
+  blocks: CodeBlock[],
+  lang: string,
+): Promise<SnippetDetail> {
+  const res = await fetch(`/api/snippets/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blocks, lang }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function deleteSnippet(id: string): Promise<void> {
   const res = await fetch(`/api/snippets/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

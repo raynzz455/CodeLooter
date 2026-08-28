@@ -13,6 +13,7 @@ import { HistoryPanel } from "@/components/codelooter/history-panel";
 import {
   extractFile,
   extractBatch,
+  updateSnippet,
   type ExtractResult,
   type BatchResult,
   type SnippetDetail,
@@ -82,6 +83,10 @@ export default function Home() {
   const [batchResults, setBatchResults] = useState<BatchResult[] | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // ID of the snippet currently loaded into the ResultPanel. When set, the
+  // panel shows an extra "Update" button so the user can push edits back to
+  // the same snippet record via PATCH /api/snippets/[id].
+  const [currentSnippetId, setCurrentSnippetId] = useState<string | undefined>(undefined);
 
   const addHistoryEntry = useHistory((s) => s.addEntry);
 
@@ -89,6 +94,9 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setBatchResults(null);
+    // Fresh extraction has no associated snippet record — clear any stale id
+    // so the ResultPanel no longer offers "Update" until the user saves.
+    setCurrentSnippetId(undefined);
     try {
       const r = await extractFile(file, lang);
       setResult(r);
@@ -109,6 +117,7 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setBatchResults(null);
+    setCurrentSnippetId(undefined);
     try {
       const results = await extractBatch(files, lang);
       setBatchResults(results);
@@ -145,12 +154,16 @@ export default function Home() {
   const handleClear = useCallback(() => {
     setResult(null);
     setBatchResults(null);
+    setCurrentSnippetId(undefined);
     toast.info("Hasil dibersihkan");
   }, []);
 
   const handleSelectHistory = useCallback((r: ExtractResult) => {
     setResult(r);
     setBatchResults(null);
+    // History entries are session-scoped extraction results and carry no
+    // snippet id, so the inline "Update" button is intentionally hidden here.
+    setCurrentSnippetId(undefined);
   }, []);
 
   const handleSelectSnippet = useCallback((detail: SnippetDetail) => {
@@ -170,23 +183,77 @@ export default function Home() {
       cached: true,
     });
     setBatchResults(null);
+    // The loaded snippet has a known record id, so the ResultPanel can offer
+    // "Update" to push edits back to this exact record.
+    setCurrentSnippetId(detail.id);
     toast.success(`Snippet "${detail.filename}" dimuat`);
   }, []);
 
-  // Keyboard shortcuts: ? to show shortcuts, Esc to clear results.
+  // Push the ResultPanel's current editable blocks back to the *existing*
+  // snippet record identified by `id`. Uses the PATCH endpoint so the record
+  // is updated in-place (no duplicate created). On success we refresh the
+  // SnippetList so the new block count / updatedAt is visible.
+  const handleUpdateSnippet = useCallback(
+    async (id: string) => {
+      if (!result) return;
+      // Build the payload from the ResultPanel's current blocks. We re-read
+      // the blocks from `result.blocks` for the parent's view of state; the
+      // ResultPanel passes its edited blocks back via the same `result` ref
+      // (page-level `result` is mutated in-place by the panel via `setResult`).
+      // To stay robust against any local-block drift inside the panel, we
+      // also accept the most-recent `result` snapshot here.
+      const blocks = result.blocks;
+      const lang = blocks[0]?.lang ?? "unknown";
+      try {
+        const updated = await updateSnippet(id, blocks, lang);
+        // Adopt the (possibly re-indexed) blocks returned by the server so the
+        // panel reflects the persisted state.
+        setResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                blocks: updated.blocks.map((b: any, i: number) => ({
+                  index: b.index ?? i,
+                  lang: b.lang,
+                  code: b.code,
+                  lines: b.lines,
+                  source: b.source ?? prev.blocks[0]?.source ?? "saved",
+                })),
+                total: updated.totalBlocks,
+              }
+            : prev,
+        );
+        setCurrentSnippetId(updated.id);
+        setRefreshKey((k) => k + 1);
+        toast.success(`Snippet diperbarui · ${updated.id.slice(0, 8)}`);
+      } catch (e: any) {
+        toast.error(e?.message ?? "Gagal memperbarui snippet");
+      }
+    },
+    [result],
+  );
+
+  // Keyboard shortcuts: ? show shortcuts, Esc clear/close, S load sample,
+  // C copy all (when result exists), / focus search.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.target?.matches?.("input,textarea,select")) {
+      const inField = e.target?.matches?.("input,textarea,select");
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !inField) {
         e.preventDefault();
         setShowShortcuts((s) => !s);
       }
       if (e.key === "Escape") {
         if (showShortcuts) setShowShortcuts(false);
       }
+      // "S" loads sample (only when not typing in a field)
+      if (e.key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey && !inField && !showShortcuts) {
+        e.preventDefault();
+        handleLoadSample();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [showShortcuts]);
+  }, [showShortcuts, handleLoadSample]);
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -336,13 +403,24 @@ export default function Home() {
                     stats: r.stats,
                   });
                   setBatchResults(null);
+                  // A batch result row is not a saved snippet — clear the
+                  // current id so "Update" is hidden until the user saves.
+                  setCurrentSnippetId(undefined);
                 }}
               />
             ) : (
               <ResultPanel
                 result={result}
                 loading={loading}
-                onSaved={() => setRefreshKey((k) => k + 1)}
+                currentSnippetId={currentSnippetId}
+                onUpdateSnippet={handleUpdateSnippet}
+                onSaved={(snippetId) => {
+                  // New snippet created → adopt it as the current id so the
+                  // next round of edits can use "Update" instead of saving
+                  // another duplicate.
+                  if (snippetId) setCurrentSnippetId(snippetId);
+                  setRefreshKey((k) => k + 1);
+                }}
               />
             )}
           </section>
@@ -377,6 +455,7 @@ export default function Home() {
               </div>
               <div className="flex flex-col gap-3 text-sm">
                 <ShortcutRow keys={["?"]} desc="Buka/tutup jendela shortcut ini" />
+                <ShortcutRow keys={["S"]} desc="Muat contoh modul R" />
                 <ShortcutRow keys={["Esc"]} desc="Tutup jendela / bersihkan fokus" />
                 <ShortcutRow keys={["Tab"]} desc="Navigasi antar elemen interaktif" />
               </div>

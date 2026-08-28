@@ -28,6 +28,8 @@ interface SortableBlockListProps {
   onChange: (index: number, code: string) => void;
   onMergeWithNext?: (index: number) => void;
   onSplit?: (index: number, atLine: number) => void;
+  onDelete?: (index: number) => void;
+  onDuplicate?: (index: number) => void;
 }
 
 // A single sortable wrapper that adds a drag handle to each CodeBlockCard.
@@ -37,6 +39,8 @@ function SortableItem({
   onChange,
   onMergeWithNext,
   onSplit,
+  onDelete,
+  onDuplicate,
   isLast,
 }: {
   block: CodeBlock;
@@ -44,6 +48,8 @@ function SortableItem({
   onChange: (index: number, code: string) => void;
   onMergeWithNext?: (index: number) => void;
   onSplit?: (index: number, atLine: number) => void;
+  onDelete?: (index: number) => void;
+  onDuplicate?: (index: number) => void;
   isLast?: boolean;
 }) {
   const {
@@ -81,6 +87,8 @@ function SortableItem({
           onChange={onChange}
           onMergeWithNext={onMergeWithNext}
           onSplit={onSplit}
+          onDelete={onDelete}
+          onDuplicate={onDuplicate}
           isLast={isLast}
         />
       </div>
@@ -95,6 +103,8 @@ export function SortableBlockList({
   onChange,
   onMergeWithNext,
   onSplit,
+  onDelete,
+  onDuplicate,
 }: SortableBlockListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -139,6 +149,8 @@ export function SortableBlockList({
               onChange={onChange}
               onMergeWithNext={onMergeWithNext}
               onSplit={onSplit}
+              onDelete={onDelete}
+              onDuplicate={onDuplicate}
               isLast={i === blocks.length - 1}
             />
           ))}

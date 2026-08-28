@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,8 @@ interface CodeBlockCardProps {
   onChange: (index: number, code: string) => void;
   onMergeWithNext?: (index: number) => void;
   onSplit?: (index: number, atLine: number) => void;
+  onDelete?: (index: number) => void;
+  onDuplicate?: (index: number) => void;
   isLast?: boolean;
 }
 
@@ -27,7 +29,7 @@ const SOURCE_LABEL: Record<string, string> = {
   pattern: "marker", "pattern-split": "split", "scan-fallback": "scan",
   density: "density", fenced: "fenced", html: "html", ipynb: "ipynb",
   latex: "latex", "txt-pattern": "txt", "pattern+merge": "marker+merge",
-  split: "split-manual", "marker+merge": "marker+merge",
+  split: "split-manual", duplicate: "copy", "marker+merge": "marker+merge",
 };
 
 // Lightweight regex-based syntax highlighting. Handles comments, strings,
@@ -107,13 +109,14 @@ export const TOKEN_CLASS: Record<string, string> = {
   nl: "",
 };
 
-export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, isLast }: CodeBlockCardProps) {
+export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, isLast }: CodeBlockCardProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
   const [collapsed, setCollapsed] = useState(false);
   const [splitMode, setSplitMode] = useState(false);
   const [splitLine, setSplitLine] = useState(1);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // NOTE: draft syncs with block.code via key-based remount in the parent
   // (ResultPanel passes key={result.filename + '-' + b.index}). This avoids
@@ -161,6 +164,21 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
     setSplitMode(false);
   };
 
+  const handleDelete = () => {
+    if (confirmDelete && onDelete) {
+      onDelete(block.index);
+      toast.success("Blok dihapus");
+    }
+    setConfirmDelete(false);
+  };
+
+  const handleDuplicate = () => {
+    if (onDuplicate) {
+      onDuplicate(block.index);
+      toast.success("Blok diduplikasi");
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
@@ -203,6 +221,35 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
               title={splitMode ? "Batal pisah" : "Pisah blok"}
             >
               <Scissors className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {/* Duplicate block */}
+          {onDuplicate && (
+            <Button
+              size="sm" variant="ghost" className="h-7 px-2 text-xs"
+              onClick={handleDuplicate}
+              title="Duplikasi blok"
+            >
+              <CopyPlus className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {/* Delete block — with confirm */}
+          {onDelete && (
+            <Button
+              size="sm" variant="ghost"
+              className={`h-7 px-2 text-xs transition-colors ${confirmDelete ? "bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 dark:text-rose-400" : "text-muted-foreground hover:text-destructive"}`}
+              onClick={() => {
+                if (confirmDelete) {
+                  handleDelete();
+                } else {
+                  setConfirmDelete(true);
+                  setTimeout(() => setConfirmDelete(false), 3000);
+                }
+              }}
+              title={confirmDelete ? "Klik lagi untuk konfirmasi hapus" : "Hapus blok"}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {confirmDelete && <span className="ml-1 text-[10px] font-medium">Konfirmasi?</span>}
             </Button>
           )}
           <Button
