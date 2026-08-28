@@ -19,7 +19,7 @@ const PRESETS: Preset[] = [
   { value: "r", label: "R Stats", tooltip: "Modul statistika R", icon: BarChart3 },
   { value: "python", label: "Python", tooltip: "Notebook Python", icon: FileCode2 },
   { value: "sql", label: "SQL", tooltip: "Skrip SQL", icon: Database },
-  { value: "auto", label: "Auto", tooltip: "Deteksi otomatis", icon: Sparkles },
+  { value: "java", label: "Java", tooltip: "Kode Java", icon: Sparkles },
 ];
 
 export function Presets({ lang, onSelect }: PresetsProps) {

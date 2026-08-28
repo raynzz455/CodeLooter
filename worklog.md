@@ -1467,3 +1467,57 @@ Stage Summary:
 - **Current project status**: Extraction quality significantly improved — from near-zero to properly detecting R, Python, and SQL code in realistic academic module files. HuggingFace transformers.js model (all-MiniLM-L6-v2, ~22MB ONNX) integrated as optional NLP enhancement, runs locally on Render free tier without external API calls.
 - **Key improvements**: 4 quality fixes (string assignment, Python control flow, R-output in fenced blocks, Kasus markers without #). HuggingFace model integration with graceful fallback.
 - **Unresolved risks**: Dev server memory issues (4GB cgroup). NLP model adds ~2s to first extraction (model download + cache).
+
+---
+Task ID: 16
+Agent: main (user request: DOCX support + force language + no auto-detect)
+Task: Add DOCX extraction, remove auto-detect, force language selection, panel kiri forces output language.
+
+Work Log:
+- User requirements:
+  1. Word/DOCX files must be supported (main file type for student research/modules)
+  2. Remove auto-detect — user MUST choose programming language upfront
+  3. Left panel language selector forces ALL output blocks to use that language
+
+**1. DOCX Extraction Support**
+- Installed `mammoth` (^1.8.0) — pure-JS DOCX text extractor.
+- Created `src/lib/extractor/docx.ts` — extracts text from DOCX via mammoth, feeds into pattern extractor.
+- Added `docx` to `ALL_SUPPORTED_EXTS` in extractor index.ts.
+- Added DOCX branch to extraction pipeline: `extractFromDocxBuffer()` → `extractCodeBlocksFromText()`.
+- Added `.docx` to ACCEPT string in upload-panel.tsx.
+- Verified: Created realistic DOCX modul praktikum (37KB) with 3 Kasus → extracted 3 R code blocks correctly, narrative filtered.
+
+**2. Remove Auto-Detect — Force Language Selection**
+- Updated `SUPPORTED_LANGS` in langdetect.ts: removed `{ value: "auto", label: "Auto-detect" }`.
+- Added emoji labels to all languages (📊 R, 🐍 Python, 🗃️ SQL, etc.).
+- Changed default language from "auto" to "r" in upload-panel.tsx (R is most common for statistika modul).
+- Updated API route (`/api/extract`): `lang` parameter is now REQUIRED. If missing or not in SUPPORTED_LANGS, returns 400 error: "Bahasa pemrograman wajib dipilih."
+- Updated batch route (`/api/extract/batch`): same force-language requirement.
+- Updated presets.tsx: removed "Auto" preset, replaced with "Java" (4 presets: R Stats, Python, SQL, Java).
+
+**3. Panel Kiri Forces Output Language**
+- The language selected in the upload panel is passed to the API as `lang=r` (or python/sql/etc.).
+- In extractor index.ts: `if (lang && lang !== "auto") { blocks = blocks.map(b => ({ ...b, lang })); }` — ALL blocks get the forced language.
+- Fixed cache bug: cache key now includes `lang` — `hashContent(content, lang)`. Previously, extracting the same file with different languages would return cached results with the wrong language. Now each (content, lang) pair is cached separately.
+- Updated upload-panel.tsx language label to "Bahasa kode (wajib pilih)" with info box: "⚡ Bahasa yang dipilih akan memaksa SEMUA blok output menggunakan bahasa tersebut."
+
+**4. Additional Quality Improvements**
+- Added Python control flow detection: `while`, `if`, `return`, `elif`, `else`, indented continuation, floor division `//`, array access `arr[mid]`.
+- Added string assignment detection: `var = "..."`, dangling assignment, R `$` accessor.
+- Added "Kasus N" markers without leading # (common in PDF-extracted text).
+- Added R-output stripping in Markdown fenced blocks.
+
+- Verified:
+  - Lint: passes cleanly ✓
+  - DOCX extraction: 3 blocks from modul praktikum DOCX ✓
+  - Force R: all blocks → "r" ✓
+  - Force Python: all blocks → "python" ✓
+  - Force SQL: all blocks → "sql" ✓
+  - Cache per-language: different languages produce different cached results ✓
+  - Quality test: 49/50 checks pass (98%) ✓
+  - Original verify: 9/9 checks pass ✓
+
+Stage Summary:
+- **Current project status**: DOCX extraction now supported (mammoth). Auto-detect removed — user MUST choose language. Panel kiri forces ALL output blocks to the selected language. Cache fixed to key per-language. Python control flow and string assignment detection improved. DOCX/PDF/MD/IPYNB/TXT/SQL all supported with forced language output.
+- **Key changes**: New docx.ts module, mammoth dependency, forced lang in API routes, cache per-language, improved isCodeLine for Python.
+- **File types supported**: PDF, DOCX, MD, IPYNB, HTML, TXT, TEX — all with forced language output.

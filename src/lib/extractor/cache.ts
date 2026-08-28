@@ -1,6 +1,7 @@
 // CodeLooter — In-memory extraction cache
-// Keyed on file-content hash + extractor version. Stale entries (older
-// version) are treated as misses — Phase 3 item #10 in the PRD, applied here.
+// Keyed on file-content hash + extractor version + forced language.
+// The language is part of the key because different language selections
+// produce different output (force-override changes all block.lang fields).
 
 import type { ExtractResult } from "./types";
 import { EXTRACTOR_VERSION } from "./types";
@@ -16,12 +17,13 @@ interface CacheEntry {
 const store = new Map<string, CacheEntry>();
 const MAX_ENTRIES = 200;
 
-export function hashContent(content: Buffer): string {
-  return createHash("sha256").update(content).digest("hex");
+export function hashContent(content: Buffer, lang?: string): string {
+  const h = createHash("sha256").update(content).digest("hex");
+  return lang ? `${h}:${lang}` : h;
 }
 
-export function getCache(content: Buffer): ExtractResult | null {
-  const key = hashContent(content);
+export function getCache(content: Buffer, lang?: string): ExtractResult | null {
+  const key = hashContent(content, lang);
   const entry = store.get(key);
   if (!entry) return null;
   if (entry.version !== EXTRACTOR_VERSION) {
@@ -33,8 +35,8 @@ export function getCache(content: Buffer): ExtractResult | null {
   return entry.result;
 }
 
-export function setCache(content: Buffer, result: ExtractResult): void {
-  const key = hashContent(content);
+export function setCache(content: Buffer, result: ExtractResult, lang?: string): void {
+  const key = hashContent(content, lang);
   if (store.size >= MAX_ENTRIES) {
     // Evict the oldest entry.
     const firstKey = store.keys().next().value;

@@ -3,6 +3,8 @@
 // return extraction results for each file. Files are processed sequentially
 // to avoid memory spikes.
 //
+// IMPORTANT: `lang` is REQUIRED — no auto-detect. Same as single extract.
+//
 // Response:
 //   { results: [{ filename, blocks, total, size, stats, error? }] }
 
@@ -12,6 +14,12 @@ import type { CodeBlock, ExtractStats } from "@/lib/extractor/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+const SUPPORTED_LANGS = new Set([
+  "r", "python", "sql", "java", "cpp", "javascript",
+  "typescript", "php", "kotlin", "go", "rust", "bash",
+  "html", "css", "json",
+]);
 
 interface BatchResultItem {
   filename: string;
@@ -25,7 +33,15 @@ interface BatchResultItem {
 export async function POST(req: NextRequest) {
   const form = await req.formData();
   const files = form.getAll("files").filter((f) => f instanceof File) as File[];
-  const lang = (req.nextUrl.searchParams.get("lang") || "auto").toLowerCase();
+  const lang = (req.nextUrl.searchParams.get("lang") || "").toLowerCase();
+
+  // Force language selection — no auto-detect.
+  if (!lang || !SUPPORTED_LANGS.has(lang)) {
+    return NextResponse.json(
+      { error: "Bahasa pemrograman wajib dipilih. Pilihan: " + Array.from(SUPPORTED_LANGS).sort().join(", ") },
+      { status: 400 },
+    );
+  }
 
   if (files.length === 0) {
     return NextResponse.json(

@@ -15,20 +15,21 @@ import {
   extractMarkdown, extractIpynb, extractHtml, extractLatex, extractTxt,
 } from "./formats";
 import { extractFromPdfBuffer } from "./pdf";
+import { extractFromDocxBuffer } from "./docx";
 import { getCache, setCache } from "./cache";
 import { classifyLinesNLP, isNLPAvailable } from "./nlp-classifier";
 import { isCodeLine, isROutput } from "./line-classify";
 import { detectLanguage } from "./langdetect";
 
 export const ALL_SUPPORTED_EXTS = new Set([
-  "pdf", "md", "markdown", "ipynb", "html", "htm",
+  "pdf", "docx", "md", "markdown", "ipynb", "html", "htm",
   "txt", "tex", "latex", "sty", "cls",
 ]);
 
 interface ExtractOptions {
   filename: string;
   content: Buffer;
-  lang: string; // "auto" or a forced language
+  lang: string; // forced language (no auto-detect — user must choose)
   useNLP?: boolean; // Enable NLP-based re-classification (default: false)
 }
 
@@ -37,8 +38,9 @@ export async function extractFromFile(opts: ExtractOptions): Promise<ExtractResu
   const ext = (filename.split(".").pop() || "").toLowerCase();
   const start = Date.now();
 
-  // Cache check — keyed on content hash + extractor version.
-  const cached = getCache(content);
+  // Cache check — keyed on content hash + extractor version + forced language.
+  // Language is part of the key because force-override changes all block.lang.
+  const cached = getCache(content, lang);
   if (cached && cached.blocks.length > 0) {
     return { ...cached, filename, cached: true };
   }
@@ -59,6 +61,12 @@ export async function extractFromFile(opts: ExtractOptions): Promise<ExtractResu
     stats = r.stats;
     pages = r.pages;
     method = pages > 0 ? `pdf-text (${pages}p)` : "pdf-text";
+  } else if (ext === "docx") {
+    // DOCX: extract text via mammoth, then run pattern extraction.
+    const r = await extractFromDocxBuffer(content);
+    rawBlocks = r.blocks;
+    stats = r.stats;
+    method = "docx-text";
   } else if (ext === "md" || ext === "markdown") {
     rawText = content.toString("utf-8");
     rawBlocks = extractMarkdown(rawText);
@@ -216,6 +224,6 @@ export async function extractFromFile(opts: ExtractOptions): Promise<ExtractResu
     stats: extractStats,
   };
 
-  setCache(content, result);
+  setCache(content, result, lang);
   return result;
 }

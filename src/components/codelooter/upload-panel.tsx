@@ -14,7 +14,7 @@ interface UploadPanelProps {
   disabled?: boolean;
 }
 
-const ACCEPT = ".pdf,.md,.markdown,.ipynb,.html,.htm,.txt,.tex,.latex,.sty,.cls";
+const ACCEPT = ".pdf,.docx,.md,.markdown,.ipynb,.html,.htm,.txt,.tex,.latex,.sty,.cls";
 
 type Mode = "file" | "paste";
 
@@ -22,7 +22,7 @@ export function UploadPanel({ onExtract, onBatchExtract, loading, disabled }: Up
   const [mode, setMode] = useState<Mode>("file");
   const [files, setFiles] = useState<File[]>([]);
   const [pastedText, setPastedText] = useState("");
-  const [lang, setLang] = useState("auto");
+  const [lang, setLang] = useState("r"); // Default: R (most common for statistika modul)
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -217,7 +217,7 @@ export function UploadPanel({ onExtract, onBatchExtract, loading, disabled }: Up
         <Presets lang={lang} onSelect={setLang} />
         <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Languages className="h-3.5 w-3.5" />
-          Bahasa kode
+          Bahasa kode (wajib pilih)
         </label>
         <select
           value={lang}
@@ -226,14 +226,18 @@ export function UploadPanel({ onExtract, onBatchExtract, loading, disabled }: Up
         >
           {SUPPORTED_LANGS.map((l) => (
             <option key={l.value} value={l.value}>
-              {l.label}
+              {l.emoji} {l.label}
             </option>
           ))}
         </select>
-        <p className="text-[11px] text-muted-foreground">
-          Pilih <span className="font-mono">R</span> untuk modul statistika —
-          semua blok akan dipaksa jadi R.
-        </p>
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+          <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+            ⚡ Bahasa yang dipilih akan memaksa SEMUA blok output menggunakan bahasa tersebut.
+          </p>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Pilih bahasa yang sesuai dengan isi dokumen Anda.
+          </p>
+        </div>
       </div>
 
       <Button

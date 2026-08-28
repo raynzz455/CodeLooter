@@ -151,21 +151,25 @@ export function detectLanguage(code: string): string {
 }
 
 // List of supported languages for the UI selector.
-export const SUPPORTED_LANGS: { value: string; label: string }[] = [
-  { value: "auto", label: "Auto-detect" },
-  { value: "r", label: "R" },
-  { value: "python", label: "Python" },
-  { value: "sql", label: "SQL" },
-  { value: "java", label: "Java" },
-  { value: "cpp", label: "C++" },
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "php", label: "PHP" },
-  { value: "kotlin", label: "Kotlin" },
-  { value: "go", label: "Go" },
-  { value: "rust", label: "Rust" },
-  { value: "bash", label: "Bash" },
-  { value: "html", label: "HTML" },
-  { value: "css", label: "CSS" },
-  { value: "json", label: "JSON" },
+// IMPORTANT: "auto" is intentionally REMOVED — the user MUST choose a
+// programming language before extraction. This is by design: forcing the
+// language selection eliminates misclassification and ensures every block
+// in the output uses the correct language. The left panel language selector
+// acts as a force-override: ALL extracted blocks will use this language.
+export const SUPPORTED_LANGS: { value: string; label: string; emoji: string }[] = [
+  { value: "r", label: "R", emoji: "📊" },
+  { value: "python", label: "Python", emoji: "🐍" },
+  { value: "sql", label: "SQL", emoji: "🗃️" },
+  { value: "java", label: "Java", emoji: "☕" },
+  { value: "cpp", label: "C++", emoji: "⚙️" },
+  { value: "javascript", label: "JavaScript", emoji: "⚡" },
+  { value: "typescript", label: "TypeScript", emoji: "🔷" },
+  { value: "php", label: "PHP", emoji: "🐘" },
+  { value: "kotlin", label: "Kotlin", emoji: "🟣" },
+  { value: "go", label: "Go", emoji: "🐹" },
+  { value: "rust", label: "Rust", emoji: "🦀" },
+  { value: "bash", label: "Bash", emoji: "🖥️" },
+  { value: "html", label: "HTML", emoji: "🌐" },
+  { value: "css", label: "CSS", emoji: "🎨" },
+  { value: "json", label: "JSON", emoji: "📋" },
 ];

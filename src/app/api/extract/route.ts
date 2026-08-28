@@ -1,7 +1,11 @@
-// POST /api/extract?lang=r&nlp=1
-// Accept a file upload (PDF, MD, IPYNB, HTML, TXT, TEX) and return extracted
-// code blocks. `lang` may be "auto" or a forced language code.
-// `nlp=1` enables NLP-based re-classification using a HuggingFace model.
+// POST /api/extract?lang=r
+// Accept a file upload (PDF, DOCX, MD, IPYNB, HTML, TXT, TEX) and return
+// extracted code blocks.
+//
+// IMPORTANT: `lang` is REQUIRED — no auto-detect. The user MUST choose a
+// programming language before extraction. This forces consistent output
+// and avoids misclassification. The selected language is applied to ALL
+// extracted blocks (force-override).
 
 import { NextRequest, NextResponse } from "next/server";
 import { extractFromFile, ALL_SUPPORTED_EXTS } from "@/lib/extractor";
@@ -9,6 +13,13 @@ import { getCacheStats, clearCache } from "@/lib/extractor/cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+// Supported languages — user must pick one.
+const SUPPORTED_LANGS = new Set([
+  "r", "python", "sql", "java", "cpp", "javascript",
+  "typescript", "php", "kotlin", "go", "rust", "bash",
+  "html", "css", "json",
+]);
 
 export async function POST(req: NextRequest) {
   const form = await req.formData();
@@ -19,8 +30,17 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const lang = (req.nextUrl.searchParams.get("lang") || "auto").toLowerCase();
+  const lang = (req.nextUrl.searchParams.get("lang") || "").toLowerCase();
   const useNLP = req.nextUrl.searchParams.get("nlp") === "1";
+
+  // Force language selection — no auto-detect allowed.
+  if (!lang || !SUPPORTED_LANGS.has(lang)) {
+    return NextResponse.json(
+      { error: "Bahasa pemrograman wajib dipilih. Pilihan: " + Array.from(SUPPORTED_LANGS).sort().join(", ") },
+      { status: 400 },
+    );
+  }
+
   const filename = file.name || "upload.txt";
   const ext = (filename.split(".").pop() || "").toLowerCase();
   if (!ALL_SUPPORTED_EXTS.has(ext)) {
