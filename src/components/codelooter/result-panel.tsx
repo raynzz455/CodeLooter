@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -34,8 +34,11 @@ interface ResultPanelProps {
   /**
    * Invoked when the user clicks "Update". The parent performs the actual
    * PATCH /api/snippets/[id] call, shows a toast, and refreshes the list.
+   * Receives the panel's current (possibly edited) blocks so the PATCH
+   * payload reflects in-panel edits (merge, split, delete, duplicate,
+   * reorder, text edits) — not the stale `result.blocks` from the parent.
    */
-  onUpdateSnippet?: (id: string) => Promise<void> | void;
+  onUpdateSnippet?: (id: string, blocks: CodeBlock[]) => Promise<void> | void;
 }
 
 export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpdateSnippet }: ResultPanelProps) {
@@ -48,6 +51,17 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   const [exportingHtml, setExportingHtml] = useState(false);
   const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
   const [reorderMode, setReorderMode] = useState(false);
+
+  // Multi-select state for bulk operations (copy / delete / ZIP). The set
+  // holds block `index` values — the same key used by every per-block
+  // handler above. We reset it whenever the underlying result changes so
+  // stale selections from a previous file don't bleed into the new one.
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  // Tracks the bulk-delete confirmation flow (mirrors the per-block pattern
+  // in CodeBlockCard: first click arms, second click within 3s commits).
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkZipping, setBulkZipping] = useState(false);
+  const [bulkCopied, setBulkCopied] = useState(false);
 
   // File extension per language, mirroring the server-side extForLang helper.
   const extForLang = (lang: string): string =>
@@ -73,6 +87,10 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     setBlocks(null);
     setViewMode("extracted");
     setReorderMode(false);
+    // Clear any active multi-select so stale selections don't bleed into
+    // the newly-loaded result.
+    setSelectedIndices(new Set());
+    setConfirmBulkDelete(false);
   }, [result]);
 
   // Sync local editable blocks whenever a new result arrives.
@@ -108,7 +126,9 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     if (effectiveBlocks.length === 0) return;
     setUpdating(true);
     try {
-      await onUpdateSnippet(currentSnippetId);
+      // Pass the panel's effective (possibly edited) blocks so the parent's
+      // PATCH payload reflects in-panel edits — not stale result.blocks.
+      await onUpdateSnippet(currentSnippetId, effectiveBlocks);
     } finally {
       setUpdating(false);
     }
@@ -372,6 +392,19 @@ ${sections}
     });
   };
 
+  // Override the auto-detected language of a single block. Same local-state
+  // pattern as `handleBlockChange`: only the matching block's `lang` field
+  // is replaced, the rest of the array is preserved. The new language is
+  // reflected immediately in the header badge, the syntax highlighter, and
+  // the per-block download extension.
+  const handleBlockLangChange = (index: number, lang: string) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      return base.map((b) => (b.index === index ? { ...b, lang } : b));
+    });
+    toast.success(`Bahasa blok #${index} diubah ke ${lang}`);
+  };
+
   // Reorder blocks via drag-and-drop. The new order is committed to local
   // state and block indices are renumbered to match the new positions.
   const handleReorder = (reordered: CodeBlock[]) => {
@@ -481,6 +514,118 @@ ${sections}
   }, {});
   const totalLines = effectiveBlocks.reduce((sum, b) => sum + b.lines, 0);
   const totalChars = effectiveBlocks.reduce((sum, b) => sum + b.code.length, 0);
+
+  // ── Multi-select handlers ───────────────────────────────────────────────
+  // Selected blocks are keyed by their `index` field (the same key every
+  // other per-block handler uses). When blocks are merged/split/deleted we
+  // renumber indices — to keep the selection in sync we rebuild the set
+  // from the surviving block identities in those handlers (see handleBulkDelete
+  // below; merge/split/duplicate intentionally leave the selection alone
+  // because the underlying indices shift and the user can simply re-pick).
+  const toggleSelect = (index: number) =>
+    setSelectedIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+
+  const selectAll = () =>
+    setSelectedIndices(new Set(effectiveBlocks.map((b) => b.index)));
+
+  const deselectAll = () => {
+    setSelectedIndices(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  // When every effective block is selected the toggle button offers
+  // "Kosongkan" (clear); otherwise it offers "Pilih semua" (select all).
+  const allSelected =
+    effectiveBlocks.length > 0 && selectedIndices.size === effectiveBlocks.length;
+
+  // Copy the code of every selected block to the clipboard, separated by
+  // a blank line so blocks stay visually distinct when pasted into an editor.
+  const handleBulkCopy = async () => {
+    const selected = effectiveBlocks.filter((b) => selectedIndices.has(b.index));
+    if (selected.length === 0) return;
+    const body = selected.map((b) => b.code).join("\n\n");
+    try {
+      await navigator.clipboard.writeText(body);
+      setBulkCopied(true);
+      setTimeout(() => setBulkCopied(false), 1500);
+      toast.success(`${selected.length} blok disalin ke clipboard`);
+    } catch {
+      toast.error("Gagal menyalin");
+    }
+  };
+
+  // Bulk delete — two-click confirm pattern (mirrors CodeBlockCard). The
+  // first click arms the button (rose tint + "Konfirmasi?" label); a
+  // second click within 3s commits the delete. After the delete we clear
+  // the selection set entirely because all referenced indices are gone.
+  const handleBulkDeleteClick = () => {
+    if (confirmBulkDelete) {
+      const count = selectedIndices.size;
+      setBlocks((prev) => {
+        const base = prev ?? result?.blocks ?? [];
+        const next = base.filter((b) => !selectedIndices.has(b.index));
+        return next.map((b, i) => ({ ...b, index: i }));
+      });
+      setSelectedIndices(new Set());
+      setConfirmBulkDelete(false);
+      toast.success(`${count} blok dihapus`);
+    } else {
+      setConfirmBulkDelete(true);
+      setTimeout(() => setConfirmBulkDelete(false), 3000);
+    }
+  };
+
+  // Build a ZIP containing only the selected blocks. Mirrors handleDownloadZip
+  // but filters `effectiveBlocks` by `selectedIndices` first and writes the
+  // archive as `{base}_selected.zip` to distinguish it from the all-blocks ZIP.
+  const handleBulkZip = async () => {
+    if (!result) return;
+    const selected = effectiveBlocks.filter((b) => selectedIndices.has(b.index));
+    if (selected.length === 0) return;
+    setBulkZipping(true);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const used = new Map<string, number>();
+      for (const b of selected) {
+        const ext = extForLang(b.lang);
+        let name = `block_${b.index}.${ext}`;
+        if (used.has(name)) {
+          const n = used.get(name)! + 1;
+          used.set(name, n);
+          name = `block_${b.index}_${n}.${ext}`;
+        } else {
+          used.set(name, 0);
+        }
+        zip.file(name, b.code);
+      }
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+      a.download = `${base}_selected.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`ZIP dengan ${selected.length} file dibuat`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal membuat ZIP");
+    } finally {
+      setBulkZipping(false);
+    }
+  };
 
   if (loading) {
     return <LoadingSkeleton />;
@@ -637,6 +782,79 @@ ${sections}
         {result.stats && <StatsChart stats={result.stats} />}
       </motion.div>
 
+      {/* Bulk action bar — only shown when at least one block is selected
+          and we're not in comparison / reorder mode (those modes have their
+          own focused UI). Slides down from the top via framer-motion. */}
+      <AnimatePresence>
+        {viewMode === "extracted" && !reorderMode && effectiveBlocks.length > 0 && selectedIndices.size > 0 && (
+          <motion.div
+            key="bulk-action-bar"
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 shadow-md backdrop-blur"
+          >
+            <CheckSquare className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+              {selectedIndices.size} blok dipilih
+            </span>
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                onClick={() => (allSelected ? deselectAll() : selectAll())}
+                title={allSelected ? "Kosongkan pilihan" : "Pilih semua blok"}
+              >
+                {allSelected ? <Square className="h-3.5 w-3.5" /> : <CheckSquare className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{allSelected ? "Kosongkan" : "Pilih semua"}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                onClick={handleBulkCopy}
+                title="Salin blok terpilih ke clipboard"
+              >
+                {bulkCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{bulkCopied ? "Tersalin" : "Salin"}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                onClick={handleBulkZip}
+                disabled={bulkZipping}
+                title="Download blok terpilih sebagai ZIP"
+              >
+                {bulkZipping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileArchive className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{bulkZipping ? "Zipping…" : "ZIP"}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`h-7 px-2 text-xs transition-colors ${confirmBulkDelete ? "bg-rose-500/15 text-rose-600 hover:bg-rose-500/25 dark:text-rose-400" : "text-emerald-700 hover:bg-rose-500/10 hover:text-rose-600 dark:text-emerald-300"}`}
+                onClick={handleBulkDeleteClick}
+                title={confirmBulkDelete ? "Klik lagi untuk konfirmasi hapus" : "Hapus blok terpilih"}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{confirmBulkDelete ? "Konfirmasi?" : "Hapus"}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300"
+                onClick={deselectAll}
+                title="Keluar mode pilih"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Blocks or Comparison view */}
       {viewMode === "comparison" && result.stats?.removedLines ? (
         <ComparisonView blocks={effectiveBlocks} removedLines={result.stats.removedLines} />
@@ -658,6 +876,7 @@ ${sections}
           onSplit={handleSplit}
           onDelete={handleDelete}
           onDuplicate={handleDuplicate}
+          onChangeLang={handleBlockLangChange}
         />
       ) : (
         <AnimatePresence mode="popLayout">
@@ -678,6 +897,9 @@ ${sections}
                 onSplit={handleSplit}
                 onDelete={handleDelete}
                 onDuplicate={handleDuplicate}
+                onChangeLang={handleBlockLangChange}
+                selected={selectedIndices.has(b.index)}
+                onToggleSelect={toggleSelect}
                 isLast={i === effectiveBlocks.length - 1}
               />
             </motion.div>

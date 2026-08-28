@@ -30,6 +30,7 @@ interface SortableBlockListProps {
   onSplit?: (index: number, atLine: number) => void;
   onDelete?: (index: number) => void;
   onDuplicate?: (index: number) => void;
+  onChangeLang?: (index: number, lang: string) => void;
 }
 
 // A single sortable wrapper that adds a drag handle to each CodeBlockCard.
@@ -41,6 +42,7 @@ function SortableItem({
   onSplit,
   onDelete,
   onDuplicate,
+  onChangeLang,
   isLast,
 }: {
   block: CodeBlock;
@@ -50,6 +52,7 @@ function SortableItem({
   onSplit?: (index: number, atLine: number) => void;
   onDelete?: (index: number) => void;
   onDuplicate?: (index: number) => void;
+  onChangeLang?: (index: number, lang: string) => void;
   isLast?: boolean;
 }) {
   const {
@@ -89,6 +92,7 @@ function SortableItem({
           onSplit={onSplit}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onChangeLang={onChangeLang}
           isLast={isLast}
         />
       </div>
@@ -105,6 +109,7 @@ export function SortableBlockList({
   onSplit,
   onDelete,
   onDuplicate,
+  onChangeLang,
 }: SortableBlockListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -151,6 +156,7 @@ export function SortableBlockList({
               onSplit={onSplit}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onChangeLang={onChangeLang}
               isLast={i === blocks.length - 1}
             />
           ))}

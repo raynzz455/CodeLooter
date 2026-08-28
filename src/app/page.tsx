@@ -194,15 +194,11 @@ export default function Home() {
   // is updated in-place (no duplicate created). On success we refresh the
   // SnippetList so the new block count / updatedAt is visible.
   const handleUpdateSnippet = useCallback(
-    async (id: string) => {
-      if (!result) return;
-      // Build the payload from the ResultPanel's current blocks. We re-read
-      // the blocks from `result.blocks` for the parent's view of state; the
-      // ResultPanel passes its edited blocks back via the same `result` ref
-      // (page-level `result` is mutated in-place by the panel via `setResult`).
-      // To stay robust against any local-block drift inside the panel, we
-      // also accept the most-recent `result` snapshot here.
-      const blocks = result.blocks;
+    async (id: string, editedBlocks: CodeBlock[]) => {
+      // Use the blocks passed from the ResultPanel (which reflect in-panel
+      // edits: merge, split, delete, duplicate, reorder, text edits) rather
+      // than the stale `result.blocks` from the parent's state.
+      const blocks = editedBlocks;
       const lang = blocks[0]?.lang ?? "unknown";
       try {
         const updated = await updateSnippet(id, blocks, lang);
@@ -230,7 +226,7 @@ export default function Home() {
         toast.error(e?.message ?? "Gagal memperbarui snippet");
       }
     },
-    [result],
+    [],
   );
 
   // Keyboard shortcuts: ? show shortcuts, Esc clear/close, S load sample,

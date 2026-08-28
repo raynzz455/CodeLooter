@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus, CheckSquare, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { CodeBlock as CodeBlockType } from "@/lib/codelooter-api";
+import { SUPPORTED_LANGS } from "@/lib/extractor/langdetect";
 
 interface CodeBlockCardProps {
   block: CodeBlockType;
@@ -15,8 +16,24 @@ interface CodeBlockCardProps {
   onSplit?: (index: number, atLine: number) => void;
   onDelete?: (index: number) => void;
   onDuplicate?: (index: number) => void;
+  onChangeLang?: (index: number, lang: string) => void;
+  /**
+   * Whether this block is currently part of the multi-select set. When true,
+   * the card receives an emerald ring + the checkbox shows a checked state.
+   */
+  selected?: boolean;
+  /**
+   * Toggles this block's membership in the multi-select set. Receives the
+   * block's `index`. The handler in ResultPanel maintains a `Set<number>`.
+   */
+  onToggleSelect?: (index: number) => void;
   isLast?: boolean;
 }
+
+// Supported languages for the per-block override selector. "auto" is excluded
+// because each block already has a concrete language at extraction time —
+// re-running auto-detect from the UI is out of scope for this feature.
+const OVERRIDABLE_LANGS = SUPPORTED_LANGS.filter((l) => l.value !== "auto");
 
 const LANG_LABEL: Record<string, string> = {
   r: "R", python: "Python", sql: "SQL", java: "Java", cpp: "C++",
@@ -109,7 +126,7 @@ export const TOKEN_CLASS: Record<string, string> = {
   nl: "",
 };
 
-export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, isLast }: CodeBlockCardProps) {
+export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, onChangeLang, selected, onToggleSelect, isLast }: CodeBlockCardProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
@@ -180,8 +197,31 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+    <div
+      className={`overflow-hidden rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md ${selected ? "border-emerald-500/50 ring-2 ring-emerald-500/40" : "border-border"}`}
+    >
       <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
+        {/* Multi-select checkbox — placed BEFORE the collapse chevron so it
+            is the very first interactive element in the header. stopPropagation
+            keeps the click from bubbling (defensive — the chevron button is a
+            separate sibling, not an ancestor, so the click wouldn't normally
+            trigger collapse anyway). */}
+        {onToggleSelect && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={!!selected}
+            aria-label={selected ? `Batal pilih blok #${block.index}` : `Pilih blok #${block.index}`}
+            title={selected ? "Batal pilih" : "Pilih blok"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect(block.index);
+            }}
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors ${selected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+          </button>
+        )}
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -198,6 +238,24 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
         >
           {LANG_LABEL[block.lang] ?? block.lang}
         </Badge>
+        {onChangeLang && (
+          <select
+            value={OVERRIDABLE_LANGS.some((l) => l.value === block.lang) ? block.lang : "unknown"}
+            onChange={(e) => onChangeLang(block.index, e.target.value)}
+            className="h-6 cursor-pointer rounded border border-border bg-background px-1 text-[10px] text-foreground outline-none transition-colors hover:bg-accent focus:ring-1 focus:ring-ring"
+            title="Ubah bahasa blok ini"
+            aria-label={`Ubah bahasa blok #${block.index}`}
+          >
+            {!OVERRIDABLE_LANGS.some((l) => l.value === block.lang) && (
+              <option value={block.lang}>{block.lang}</option>
+            )}
+            {OVERRIDABLE_LANGS.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="text-[11px] text-muted-foreground">{block.lines} lines · {charCount} chars</span>
         <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
           {SOURCE_LABEL[block.source] ?? block.source}
