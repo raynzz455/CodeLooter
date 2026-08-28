@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -107,9 +107,15 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // NOTE: draft syncs with block.code via key-based remount in the parent
+  // (ResultPanel passes key={result.filename + '-' + b.index}). This avoids
+  // both useEffect and render-phase setState lint violations.
 
   const tokens = useMemo(() => highlight(block.code, block.lang), [block.code, block.lang]);
   const lineCount = useMemo(() => block.code.split("\n").length, [block.code]);
+  const charCount = useMemo(() => block.code.length, [block.code]);
 
   const handleCopy = async () => {
     try {
@@ -135,6 +141,13 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title={collapsed ? "Buka" : "Tutup"}
+        >
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
         <span className="font-mono text-xs font-semibold text-muted-foreground">
           #{block.index}
         </span>
@@ -144,7 +157,7 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
         >
           {LANG_LABEL[block.lang] ?? block.lang}
         </Badge>
-        <span className="text-[11px] text-muted-foreground">{block.lines} lines</span>
+        <span className="text-[11px] text-muted-foreground">{block.lines} lines · {charCount} chars</span>
         <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
           {SOURCE_LABEL[block.source] ?? block.source}
         </Badge>
@@ -170,34 +183,36 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
           </Button>
         </div>
       </div>
-      <div className="relative max-h-96 overflow-auto bg-slate-950/95 dark:bg-black/40">
-        {editing ? (
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="min-h-[160px] w-full resize-y bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
-            spellCheck={false}
-          />
-        ) : (
-          <div className="flex">
-            {/* Line numbers */}
-            <div className="select-none border-r border-white/5 py-3 pl-3 pr-2 text-right font-mono text-[11px] leading-relaxed text-slate-600">
-              {Array.from({ length: lineCount }, (_, i) => (
-                <div key={i}>{i + 1}</div>
-              ))}
-            </div>
-            {/* Code */}
-            <pre className="flex-1 overflow-x-auto p-3 font-mono text-[12.5px] leading-relaxed">
-              <code>
-                {tokens.map((tk, i) => (
-                  <span key={i} className={TOKEN_CLASS[tk.c]}>{tk.t}</span>
+      {!collapsed && (
+        <div className="relative max-h-96 overflow-auto bg-slate-950/95 dark:bg-black/40">
+          {editing ? (
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="min-h-[160px] w-full resize-y bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none"
+              spellCheck={false}
+            />
+          ) : (
+            <div className="flex">
+              {/* Line numbers */}
+              <div className="select-none border-r border-white/5 py-3 pl-3 pr-2 text-right font-mono text-[11px] leading-relaxed text-slate-600">
+                {Array.from({ length: lineCount }, (_, i) => (
+                  <div key={i}>{i + 1}</div>
                 ))}
-              </code>
-            </pre>
-          </div>
-        )}
-      </div>
-      {editing && (
+              </div>
+              {/* Code */}
+              <pre className="flex-1 overflow-x-auto p-3 font-mono text-[12.5px] leading-relaxed">
+                <code>
+                  {tokens.map((tk, i) => (
+                    <span key={i} className={TOKEN_CLASS[tk.c]}>{tk.t}</span>
+                  ))}
+                </code>
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+      {editing && !collapsed && (
         <div className="flex justify-end gap-2 border-t border-border/60 bg-muted/20 px-3 py-2">
           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleCancel}>
             <X className="h-3.5 w-3.5" /> Batal

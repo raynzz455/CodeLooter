@@ -1,8 +1,11 @@
 "use client";
 
-import { FileCode2, Github, Sparkles } from "lucide-react";
+import { FileCode2, Github, Sparkles, Sun, Moon } from "lucide-react";
+import { useTheme } from "next-themes";
 
 export function Header() {
+  const { theme, setTheme } = useTheme();
+
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
@@ -25,6 +28,17 @@ export function Header() {
             <Sparkles className="h-3 w-3" />
             Phase 1 · extraction fix
           </span>
+          {/* Dark mode toggle — both icons rendered, CSS controls visibility
+              based on .dark class to avoid hydration mismatch. */}
+          <button
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            title="Toggle theme"
+            aria-label="Toggle theme"
+          >
+            <Sun className="hidden h-4 w-4 dark:block" />
+            <Moon className="block h-4 w-4 dark:hidden" />
+          </button>
           <a
             href="https://github.com/raynzz455/CodeLooter"
             target="_blank"

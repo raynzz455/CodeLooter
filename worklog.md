@@ -27,3 +27,63 @@ Stage Summary:
 - **Files produced**: `src/lib/extractor/*.ts` (9 modules), `src/app/api/{extract,snippets}/route.ts`, `src/components/codelooter/*.tsx` (7 components), `src/app/page.tsx`, updated `layout.tsx`, `next.config.ts`, `prisma/schema.prisma`.
 - **Known limitation**: PDF extraction uses a pure-TS parser that handles text-based PDFs with FlateDecode + standard encodings. CID-keyed fonts / image-based PDFs (needing OCR) are out of scope for Phase 1.
 - **Unresolved / next-phase**: Phase 2 (UX: inline editor for snippets, OCR progress bar, clear UI separation) and Phase 3 (dead-code cleanup, test suite, cache versioning) are NOT yet started — the PRD roadmap lists them after Phase 1.
+
+---
+Task ID: 2
+Agent: webDevReview (cron round 1)
+Task: QA assessment + bug fixes + new features + styling improvements for CodeLooter Phase 1.
+
+Work Log:
+- Reviewed worklog.md (Task 1) — Phase 1 extraction complete and verified.
+- Performed QA testing via agent-browser: app loads, no console errors, all API endpoints respond correctly.
+- Identified and fixed 2 bugs:
+  1. **result-panel.tsx blocks state stale**: `blocks` state didn't reset when a new extraction result arrived. After editing a block in file A, extracting file B still showed file A's edited blocks. Fixed with `useEffect(() => setBlocks(null), [result])`.
+  2. **code-block-card.tsx draft state stale**: `draft` state didn't sync when `block.code` changed externally (e.g., loading a saved snippet). Fixed via key-based remount: parent passes `key={result.filename + '-' + b.index}` so cards remount with fresh state on each new result.
+
+- Added 7 new features:
+  1. **Dark mode toggle** (header.tsx): Sun/Moon toggle using next-themes. CSS controls icon visibility via `dark:` classes to avoid hydration mismatch. ThemeProvider wrapper added to layout.tsx.
+  2. **Paste-text mode** (upload-panel.tsx): Toggle between "Upload file" and "Tempel teks" (paste text). Paste mode provides a textarea for direct code/document input, creates a File from the text on extract. Shows live char/line count.
+  3. **Snippet search** (snippet-list.tsx): Client-side search input that filters snippets by filename and language. Shows "no results" state when query matches nothing.
+  4. **Copy-all-blocks button** (result-panel.tsx): Copies all block code to clipboard in one click, with copied-state feedback.
+  5. **Block collapse/expand** (code-block-card.tsx): Chevron toggle to collapse/expand each code block. Collapsed blocks show only the header bar.
+  6. **Language distribution badges** (result-panel.tsx): Shows which languages were detected and how many blocks per language (e.g., "r ×3, python ×1").
+  7. **Keyboard shortcuts modal** (page.tsx): Press `?` to toggle a shortcuts overlay. Esc to close.
+
+- Improved styling with framer-motion animations:
+  - Hero section: staggered fade-in for badge, title, description
+  - Feature pills: hover border color change to emerald
+  - Upload/snippet cards: slide-in from left on mount
+  - Result blocks: AnimatePresence with layout animation, staggered by block index
+  - Keyboard shortcuts modal: scale + fade transition
+  - Decorative grid pattern in hero background (radial-gradient)
+  - Char count added to block header ("3 lines · 145 chars")
+  - Total lines + chars in file header
+  - Clear button next to "Upload & ekstrak" heading
+  - Improved footer with GitHub link and format list
+
+- Verified all API endpoints via curl:
+  - MD extraction: 2 blocks, markdown-fenced ✓
+  - PDF extraction: 2 blocks, pdf-text (1p), 2 line-wraps repaired ✓
+  - Paste text extraction: 1 block, txt-pattern ✓
+  - Snippets list: returns saved snippets ✓
+  - Extraction verify suite: 9/9 checks pass ✓
+  - Lint: passes cleanly ✓
+
+- Verified via agent-browser:
+  - Page loads with no console errors ✓
+  - Dark mode toggle works ("DARK MODE ON" confirmed) ✓
+  - Paste-text mode works (textarea found) ✓
+  - Light/dark/paste-mode screenshots saved ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. All API endpoints work correctly. The UI is now significantly more feature-rich with dark mode, paste-text input, snippet search, copy-all, block collapse, keyboard shortcuts, and framer-motion animations.
+- **Completed modifications**: 2 bug fixes (stale state), 7 new features, comprehensive styling improvements with animations. All lint checks pass. Extraction quality unchanged (9/9 verify checks).
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit). Turbopack compilation spikes + chromium (~1GB RSS) can OOM-kill the server. This is an infrastructure limitation, not a code bug — all endpoints work via curl when the browser isn't open. Mitigation: pre-warm routes via curl before opening the browser.
+  - PDF extraction uses a pure-TS parser (handles text-based PDFs with FlateDecode). CID-keyed fonts and image-based PDFs (needing OCR) are out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): inline snippet editor, OCR progress indicator, clear UI separation between extraction-language and preview-language panels
+  2. Phase 3 (Reliability): dead-code cleanup, unit test suite with ground-truth fixtures, cache versioning (already partially done)
+  3. Consider migrating from turbopack to webpack for dev mode (more memory-stable, but slower compilation)
+  4. Add batch extraction (multiple files at once)
+  5. Add export to ZIP (all blocks as separate files in a zip)

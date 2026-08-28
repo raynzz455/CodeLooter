@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
@@ -18,6 +19,14 @@ interface ResultPanelProps {
 export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  // BUGFIX: Reset local editable blocks whenever a new result arrives.
+  // Previously, editing a block then extracting a new file would show the
+  // old edited blocks instead of the fresh extraction result.
+  useEffect(() => {
+    setBlocks(null);
+  }, [result]);
 
   // Sync local editable blocks whenever a new result arrives.
   const effectiveBlocks = blocks ?? result?.blocks ?? [];
@@ -82,6 +91,26 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
     });
   };
 
+  const handleCopyAll = async () => {
+    const body = effectiveBlocks.map((b) => b.code).join("\n\n");
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+      toast.success(`${effectiveBlocks.length} blok disalin ke clipboard`);
+    } catch {
+      toast.error("Gagal menyalin");
+    }
+  };
+
+  // Language distribution for the summary bar.
+  const langDist = effectiveBlocks.reduce<Record<string, number>>((acc, b) => {
+    acc[b.lang] = (acc[b.lang] || 0) + 1;
+    return acc;
+  }, {});
+  const totalLines = effectiveBlocks.reduce((sum, b) => sum + b.lines, 0);
+  const totalChars = effectiveBlocks.reduce((sum, b) => sum + b.code.length, 0);
+
   if (loading) {
     return (
       <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
@@ -112,7 +141,12 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   return (
     <div className="flex flex-col gap-4">
       {/* File header */}
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm"
+      >
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
             <FileText className="h-5 w-5" />
@@ -120,10 +154,20 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
           <div className="min-w-0 flex-1">
             <p className="truncate font-mono text-sm font-semibold">{result.filename}</p>
             <p className="text-xs text-muted-foreground">
-              {(result.size / 1024).toFixed(1)} KB · {result.total} blok kode
+              {(result.size / 1024).toFixed(1)} KB · {result.total} blok kode · {totalLines} baris · {totalChars.toLocaleString()} karakter
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleCopyAll}
+              disabled={effectiveBlocks.length === 0}
+              title="Salin semua blok"
+            >
+              {copiedAll ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              <span className="hidden sm:inline">Salin semua</span>
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -131,7 +175,7 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
               disabled={effectiveBlocks.length === 0}
             >
               <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Download semua</span>
+              <span className="hidden sm:inline">Download</span>
             </Button>
             <Button
               size="sm"
@@ -140,12 +184,26 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span className="hidden sm:inline">Simpan snippet</span>
+              <span className="hidden sm:inline">Simpan</span>
             </Button>
           </div>
         </div>
+        {/* Language distribution badges */}
+        {effectiveBlocks.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2">
+            <span className="text-[11px] text-muted-foreground">Bahasa:</span>
+            {Object.entries(langDist).map(([lang, count]) => (
+              <span
+                key={lang}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+              >
+                {lang} ×{count}
+              </span>
+            ))}
+          </div>
+        )}
         {result.stats && <StatsBar stats={result.stats} />}
-      </div>
+      </motion.div>
 
       {/* Blocks */}
       {effectiveBlocks.length === 0 ? (
@@ -157,16 +215,24 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <AnimatePresence mode="popLayout">
           {effectiveBlocks.map((b) => (
-            <CodeBlockCard
-              key={b.index}
-              block={b}
-              onDownload={handleBlockDownload}
-              onChange={handleBlockChange}
-            />
+            <motion.div
+              key={`${result.filename}-${b.index}`}
+              layout
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, delay: b.index * 0.04 }}
+            >
+              <CodeBlockCard
+                block={b}
+                onDownload={handleBlockDownload}
+                onChange={handleBlockChange}
+              />
+            </motion.div>
           ))}
-        </div>
+        </AnimatePresence>
       )}
     </div>
   );

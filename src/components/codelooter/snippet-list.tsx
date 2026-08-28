@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { History, Trash2, FileCode, Loader2, Clock } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { History, Trash2, FileCode, Loader2, Clock, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -37,6 +37,7 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
   const [snippets, setSnippets] = useState<SnippetMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -52,6 +53,17 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
   useEffect(() => {
     load();
   }, [refreshKey]);
+
+  // Client-side search filter — searches filename and language.
+  const filtered = useMemo(() => {
+    if (!query.trim()) return snippets;
+    const q = query.toLowerCase();
+    return snippets.filter(
+      (s) =>
+        s.originalFilename.toLowerCase().includes(q) ||
+        s.extractedLang.toLowerCase().includes(q),
+    );
+  }, [snippets, query]);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -89,6 +101,28 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
         </span>
       </div>
 
+      {/* Search input */}
+      {snippets.length > 0 && (
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari snippet..."
+            className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-7 text-xs outline-none focus:ring-2 focus:ring-ring"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -100,9 +134,16 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
             Belum ada snippet. Simpan hasil ekstraksi untuk menyimpannya di sini.
           </p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-4 text-center">
+          <Search className="mx-auto mb-1.5 h-5 w-5 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
+            Tidak ada snippet cocok dengan &ldquo;{query}&rdquo;
+          </p>
+        </div>
       ) : (
         <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto pr-1">
-          {snippets.map((s) => (
+          {filtered.map((s) => (
             <div
               key={s.id}
               role="button"
