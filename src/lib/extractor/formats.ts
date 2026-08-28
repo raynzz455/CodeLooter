@@ -3,6 +3,7 @@
 
 import type { RawBlock } from "./types";
 import { detectLanguage } from "./langdetect";
+import { isROutput } from "./line-classify";
 import { extractViaDensity } from "./pattern-extract";
 
 // ─── Markdown fenced code blocks ───
@@ -14,8 +15,21 @@ export function extractMarkdown(text: string): RawBlock[] {
   FENCED_RE.lastIndex = 0;
   while ((m = FENCED_RE.exec(text)) !== null) {
     const hint = (m[1] || m[3] || "").toLowerCase().trim();
-    const code = (m[2] || m[4] || "").trim();
+    let code = (m[2] || m[4] || "").trim();
     if (code.length < 10) continue;
+
+    // Phase 1 Fix #4: Strip R console output lines (## ..., [1] ...) from
+    // fenced code blocks. In academic modules, R output is often included
+    // inside fenced blocks alongside the code — it should not be part of
+    // the extracted code block.
+    const codeLines = code.split("\n").filter((l) => !isROutput(l));
+    code = codeLines.join("\n").trim();
+    if (code.length < 10) continue;
+
+    // Phase 1 Fix #3 (light): collapse runs of whitespace that were left
+    // behind by removed R-output lines into a single blank line.
+    code = code.replace(/\n{3,}/g, "\n\n").trim();
+
     blocks.push({
       code,
       lang: hint || detectLanguage(code),

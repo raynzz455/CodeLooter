@@ -107,8 +107,10 @@ function stripROutput(code: string): { code: string; stripped: number } {
 }
 
 // Split a block on "# Kasus N" / "# Contoh N" markers so each numbered case
-// becomes its own block (mirrors the original SPLIT_PATTERN logic).
-const SPLIT_PATTERN = /(?:^[ \t]*#[Kk]asus\s+\d|^[ \t]*#[Cc]ontoh\s+\d|^[ \t]*#[Kk]orelasi\s+[Pp]earson\s+contoh|^[ \t]*#korelasi\s+pearson\s+contoh\s*\d|^[ \t]*data_\w+\s*<-?\s*data\.frame|^[ \t]*data_\w+\s*=\s*data\.frame)/m;
+// becomes its own block. Also matches "Kasus N" without leading # (common
+// in PDF-extracted text where the # was lost) and "data_xxx <- data.frame"
+// (each data.frame assignment starts a new logical block).
+const SPLIT_PATTERN = /(?:^[ \t]*#[Kk]asus\s+\d|^[ \t]*#[Cc]ontoh\s+\d|^[ \t]*#[Kk]orelasi\s+[Pp]earson\s+contoh|^[ \t]*#korelasi\s+pearson\s+contoh\s*\d|^[ \t]*data_\w+\s*<-?\s*data\.frame|^[ \t]*data_\w+\s*=\s*data\.frame|^[ \t]*Kasus\s+\d|^[ \t]*Contoh\s+\d|^[ \t]*Soal\s+\d|^[ \t]*Latihan\s+\d|^[ \t]*Praktikum\s+\d|^[ \t]*Tugas\s+\d)/m;
 
 function splitOnMarkers(block: RawBlock): RawBlock[] {
   const code = block.code;

@@ -1369,3 +1369,42 @@ Stage Summary:
   - Dev server crashes under heavy browser load (4GB cgroup memory limit) — known issue, all endpoints work via curl.
   - LLM extraction depends on z-ai-web-dev-sdk availability — has automatic fallback to pattern extraction.
   - The neo-brutalist design uses inline styles (matching original CodeLooter) rather than Tailwind — this is intentional to match the original look exactly.
+
+---
+Task ID: 14
+Agent: main (user request: focus on research module files)
+Task: Fix extraction for realistic academic module files (modul praktikum, notebook mahasiswa, skrip SQL).
+
+Work Log:
+- User pointed out that the files being processed should be files related to research modules and files commonly used by students.
+- Created 4 realistic academic test files:
+  1. `/tmp/modul_praktikum_r.md` — Markdown modul praktikum statistika with 3 Kasus (Chi-Square, Korelasi, Regresi), fenced R code blocks, R-output, interpretasi narrative, penugasan, referensi.
+  2. `/tmp/modul_praktikum.pdf` — PDF version of the same module (generated via fpdf2 with Courier font to simulate academic PDF).
+  3. `/tmp/notebook_mahasiswa.ipynb` — Jupyter notebook for a student's tugas akhir (data analysis with pandas, matplotlib, scipy regression).
+  4. `/tmp/skrip_sql_mahasiswa.sql` — SQL script for a database tugas (CREATE TABLE, JOIN queries, INSERT data).
+
+- Found and fixed 2 extraction quality issues:
+
+**Fix 1: R-output stripping in Markdown fenced blocks (formats.ts)**
+- Problem: Fenced markdown code blocks that contained R console output (``` ``` ``` blocks with `##` lines) were extracted as-is — the R-output was included in the code block.
+- Fix: `extractMarkdown()` now filters out R-output lines (`## ...`, `[1] ...`) from each fenced block using `isROutput()`. Also collapses whitespace left behind by removed lines.
+
+**Fix 2: "Kasus N" markers without leading # (line-classify.ts + pattern-extract.ts)**
+- Problem: PDF text extraction often loses the `#` from `# Kasus 1` headers — they become plain `Kasus 1:`. The extractor only matched `#\s*Kasus\s+\d` so these blocks weren't split correctly.
+- Fix:
+  - Added `^\s*Kasus\s+\d`, `^\s*Soal\s+\d`, `^\s*Contoh\s+\d`, `^\s*Latihan\s+\d`, `^\s*Praktikum\s+\d`, `^\s*Tugas\s+\d` to `CODE_START_PATTERNS` (without leading #).
+  - Updated `SPLIT_PATTERN` in pattern-extract.ts to also match these plain-text markers.
+
+- Verified extraction on all 4 academic file types (via bun directly, since server has memory issues):
+  - **Markdown modul R**: 3 blocks (was 4 — R-output block now stripped) ✓
+  - **PDF modul praktikum**: 3 blocks (was 1 — now correctly splits on "Kasus N" without #) ✓, 9 line-wraps repaired, 1 R-output stripped, 8 narrative lines filtered
+  - **IPYNB notebook**: 3 Python code blocks detected ✓
+  - **SQL script**: 1 block with 11 lines (CREATE TABLE + queries) ✓
+  - **Quality test**: 50/50 checks pass (100%) ✓
+  - **Original verify**: 9/9 checks pass ✓
+  - **Lint**: passes cleanly ✓
+
+Stage Summary:
+- **Current project status**: Extraction now correctly handles realistic academic module files — Markdown modul praktikum, PDF modul, Jupyter notebooks, and SQL scripts commonly used by Indonesian university students. R-output is stripped from fenced code blocks. "Kasus N" headers without leading # (common in PDF-extracted text) are now recognized as block boundaries.
+- **Key fixes**: 2 extraction quality fixes (R-output in fenced blocks + Kasus markers without #). 4 new test files created for realistic academic scenarios.
+- **Unresolved risks**: Dev server crashes under browser load (4GB cgroup memory limit) — all extraction logic verified via direct bun tests.

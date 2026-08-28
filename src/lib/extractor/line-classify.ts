@@ -98,6 +98,14 @@ export const CODE_START_PATTERNS: RegExp[] = [
   /Jawaban\s*:/i, // additional: "Jawaban:"
   /Script\s*:/i, // additional: "Script:"
   /Syntax\s*:/i, // additional: "Syntax:"
+  // Without leading # — common in PDF-extracted text where the # was lost
+  // or the module uses plain "Kasus N:" headers.
+  /^\s*Kasus\s+\d/i,
+  /^\s*Soal\s+\d/i,
+  /^\s*Contoh\s+\d/i,
+  /^\s*Latihan\s+\d/i,
+  /^\s*Praktikum\s+\d/i,
+  /^\s*Tugas\s+\d/i,
 ];
 
 export const CODE_END_PATTERNS: RegExp[] = [
