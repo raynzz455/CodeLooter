@@ -1,0 +1,36 @@
+// CodeLooter — Prisma schema (SQLite)
+// Snippets store extracted code blocks per user-uploaded document.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Snippet {
+  id                String   @id @default(cuid())
+  originalFilename  String
+  // blocks stored as JSON string: [{index, lang, code, lines}]
+  blocksJson        String
+  totalBlocks       Int
+  fileSize          Int
+  extractedLang     String   @default("auto")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([createdAt])
+}
+
+model ExtractCache {
+  id        String   @id @default(cuid())
+  fileHash  String   @unique
+  payload   String   // JSON serialized ExtractResponse
+  version   String   // extractor version, used for invalidation
+  createdAt DateTime @default(now())
+  hits      Int      @default(0)
+
+  @@index([version])
+}
