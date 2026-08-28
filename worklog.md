@@ -1040,3 +1040,148 @@ Stage Summary:
   3. Add snippet folders/categories (beyond flat tags)
   4. Add block annotations/notes (user can add a note to a block)
   5. Add "compare two snippets" feature (diff view)
+
+---
+Task ID: 11-a
+Agent: full-stack-developer
+Task: Add block annotations/notes (user can add a note to a block)
+
+Work Log:
+- Read previous worklog (Tasks 1-10) and the four target files (`src/lib/codelooter-api.ts`, `src/components/codelooter/code-block-card.tsx`, `src/components/codelooter/result-panel.tsx`, `src/components/codelooter/sortable-block-list.tsx`) to understand existing patterns: the `CodeBlock` type, the `bookmark`/`onToggleBookmark` round-trip pattern (which the new `note` feature mirrors), the key-based remount sync strategy used for `draft`/`block.code`, and how `effectiveBlocks` is used for pre-change toast lookups.
+- `src/lib/codelooter-api.ts`: Added `note?: string` to the `CodeBlock` interface (with a comment matching the existing `bookmarked` doc style — explains it's UI-only, persists via the API routes' verbatim blocks-JSON round-trip, and that undefined/"" are treated as "no note").
+- `src/components/codelooter/code-block-card.tsx`:
+  - Imported `StickyNote` from lucide-react (added to the existing icon import line).
+  - Added `onChangeNote?: (index: number, note: string) => void` to `CodeBlockCardProps` (with a doc comment).
+  - Added `noteMode` and `noteDraft` local state (initialized from `block.note ?? ""`).
+  - Computed `hasNote = !!(block.note && block.note.trim().length > 0)` to drive icon + dot indicator.
+  - Added `handleNoteBlur` — only calls `onChangeNote` when the draft differs from the persisted note (avoids no-op writes / spurious toasts when the user clicks in and out without editing).
+  - Added the note toggle button in the header, immediately AFTER the bookmark star button: `StickyNote` icon, amber-filled when `hasNote`, amber dot indicator (absolute-positioned `<span>` with `ring-card` border) shown only when `hasNote && !noteMode`.
+  - Added the note textarea BELOW the code area (rendered when `noteMode && !collapsed && onChangeNote`): wrapper div with `bg-amber-50 dark:bg-amber-950/20 border-t border-amber-500/30`, transparent textarea with the required placeholder `"Tambahkan catatan untuk blok ini..."` and amber placeholder text. Auto-saves via `onBlur={handleNoteBlur}` (no explicit save button).
+- `src/components/codelooter/sortable-block-list.tsx`: Added `onChangeNote?` to `SortableBlockListProps` and `SortableItem` props; forwarded it into `CodeBlockCard` in the `SortableItem` render and into each `SortableItem` from the main list render (so the note UI is available in reorder mode too).
+- `src/components/codelooter/result-panel.tsx`:
+  - Added `handleChangeNote(index, note)` handler right after `handleToggleBookmark`, mirroring its `setBlocks(prev => ...)` pattern. Toast fires only when the note actually changed (compared against pre-update `effectiveBlocks` value) to avoid spurious toasts on no-op blurs.
+  - Wired `onChangeNote={handleChangeNote}` into both the `SortableBlockList` (reorder view) and the `CodeBlockCard` (normal filtered view).
+- Ran `bun run lint` — passed with no errors. Checked `dev.log` — server running clean, no compile errors.
+
+Stage Summary:
+- Users can now attach a personal note/annotation to any code block via a StickyNote toggle button in the block header (placed after the bookmark star).
+- The note textarea lives below the code area, is hidden when the card is collapsed, and auto-saves on blur (no save button). Amber color theme (`bg-amber-50 dark:bg-amber-950/20 border-amber-500/30`) visually distinguishes notes from code; no blue/indigo used.
+- The note button shows three visual states: muted outline (no note), amber filled (note exists, mode on), amber filled + amber dot indicator (note exists, mode off — so a hidden note is still discoverable at a glance).
+- Notes persist with the snippet: because the API routes round-trip the blocks JSON verbatim, `block.note` is saved/loaded automatically when the user clicks "Simpan" / "Update" / loads a saved snippet. No backend changes were needed.
+- Toast `"Catatan disimpan"` fires only on actual changes (on blur), not on every keystroke, and not on no-op blurs.
+- Feature is available in both the normal filtered view and the reorder (drag-and-drop) view.
+- `bun run lint` clean.
+
+---
+Task ID: 11-b
+Agent: full-stack-developer
+Task: Add IPYNB export + snippet statistics dashboard
+
+Work Log:
+- Read prior worklog entries (Tasks 1–10) and the four target files plus the existing snippets API routes + Prisma schema to understand the current export-button group, the Snippet model (`blocksJson`, `totalBlocks`, `fileSize`, `extractedLang`, `tags`, `createdAt`), and the dialog overlay pattern used by the keyboard-shortcuts modal in `page.tsx`. Also confirmed `recharts` (v2.15.4) and `framer-motion` (v12.23.2) are already in `package.json` — no new dependencies needed.
+
+**Feature 1: IPYNB (Jupyter Notebook) export**
+- `src/components/codelooter/result-panel.tsx`:
+  - Added `BookOpen` to the lucide-react import list.
+  - Added `exportingIpynb` state (`useState(false)`) next to `exportingJson` so the button shows its own `Loader2` spinner during export.
+  - Added `handleDownloadIpynb()` handler that builds the canonical Jupyter notebook structure:
+    - Top-level `{ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { display_name: "Python 3", language: "python", name: "python3" }, language_info: { name: "python" } }, cells: [] }`.
+    - First cell: a markdown header cell with the source filename and the total block count (`# ${baseName}\nExtracted by CodeLooter — N blocks\n`).
+    - Per block: a markdown header cell (`## Block #N | lang | N lines\n`) followed by a code cell with `execution_count: null`, `outputs: []`, and `source` = the block's code split into lines (every line except the last carries a trailing `\n` per the nbformat spec; a trailing `""` from `split("\n")` is dropped so we don't append an extra blank line).
+    - Serialized via `JSON.stringify(..., null, 2)`, written to a `Blob` with `type="application/json;charset=utf-8"`, and downloaded as `${baseName}.ipynb` via a temporary `<a>` element + `URL.createObjectURL`.
+    - Toast: `IPYNB dengan N blok dibuat`.
+  - Added a new `<Button variant="outline">` in the file header button group, placed immediately after the JSON button and before the comparison-view toggle. Uses the `BookOpen` icon (filled with `Loader2` spinner while `exportingIpynb` is true), is disabled when there are no blocks or while an export is in flight, and shows the responsive label `IPYNB` / `Membuat…` (hidden on small screens).
+
+**Feature 2: Snippet statistics dashboard**
+- `src/app/api/stats/route.ts` (NEW):
+  - `GET /api/stats` — queries all snippets (newest-first by `createdAt`) selecting `id`, `originalFilename`, `totalBlocks`, `fileSize`, `extractedLang`, `tags`, `createdAt`, and `blocksJson`.
+  - Aggregates: `totalSnippets` (count), `totalBlocks` (sum of parsed blocks length, falling back to the denormalized `totalBlocks` only if blocksJson is corrupt — actually it sums parsed block count which equals `totalBlocks` for healthy records), `totalLines` (sum of `b.lines`, falling back to `b.code.split("\n").length` when `lines` is missing), `totalChars` (sum of `b.code.length`), `totalFileSize` (sum of `s.fileSize`), `languages` (per-lang counts keyed by the block's `lang` string, with `"unknown"` bucket for missing/empty), `recentSnippets` (top 5 by createdAt, with full metadata for the dashboard list), `oldestSnippet` (last-iteration `createdAt.toISOString()`) and `newestSnippet` (first-iteration `createdAt.toISOString()`).
+  - Defensive JSON parsing: a single corrupt `blocksJson` record never breaks the whole dashboard — it just contributes 0 to the per-block aggregates but still counts toward `totalSnippets` and `totalFileSize`.
+  - `runtime = "nodejs"` to match the other snippet API routes.
+- `src/components/codelooter/stats-dashboard.tsx` (NEW):
+  - A modal/dialog overlay matching the existing pattern in `page.tsx`: `fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4` backdrop with `onClick={onClose}`, inner `motion.div` with `onClick={(e) => e.stopPropagation()}` and `initial/animate/exit` framer-motion transitions (scale + opacity + y).
+  - Fetches data from `GET /api/stats` on every `open` transition via an async IIFE inside `useEffect` (the IIFE pattern keeps the initial `setLoading(true)` / `setError(null)` calls inside a microtask rather than synchronously in the effect body — this satisfies the React 19 `react-hooks/set-state-in-effect` lint rule).
+  - Close button (`X`) in the top-right header, plus Escape-key handler for keyboard accessibility.
+  - Loading state: `Loader2` spinner + "Memuat statistik..." text.
+  - Error state: rose-tinted message with the error string.
+  - Empty state (zero snippets): muted icon + "Belum ada snippet tersimpan" + helper text.
+  - Content layout (when data exists):
+    - Top row: 4 stat cards in a `grid-cols-2 sm:grid-cols-4` — Snippet (FileText), Blok kode (Boxes), Total baris (AlignLeft), Total karakter (Type). Each card has an emerald icon badge, a label, a mono-font bold value, and a small hint.
+    - Secondary row: 3 secondary cards in `grid-cols-1 sm:grid-cols-3` — Total ukuran file (HardDrive, formatted via `formatBytes`), Snippet terbaru (BarChart3, formatted via `formatDate`), Snippet terlama (BarChart3, formatted via `formatDate`).
+    - Language distribution: a horizontal bar chart (recharts `BarChart` with `layout="vertical"`) showing `langRows` sorted desc by count. Bars use the emerald/teal `LANG_COLORS` palette (6 colors cycled). Tooltip shows `N blok (X%)` with the percentage of `langTotal`. Chart height is capped at `Math.min(280, langRows.length * 36)` via inline style so it grows with the language count but never overflows.
+    - Recent snippets: a `<ul>` of the top 5 snippets, each rendered as a row with the block count in an emerald badge, the filename (mono font), the lang + size + createdAt metadata, and up to 3 tag badges (with a `+N` overflow indicator) when tags exist.
+  - Strictly emerald/teal palette — no blue or indigo anywhere. The `LANG_COLORS` array uses `#10b981`, `#14b8a6`, `#0d9488`, `#34d399`, `#2dd4bf`, `#059669` (all emerald/teal shades).
+  - Small presentational helpers: `StatCard` and `SecondaryCard` extracted to keep the main render compact.
+- `src/components/codelooter/header.tsx`:
+  - Added `BarChart3` to the lucide-react import list.
+  - Added a new optional `onShowStats?: () => void` prop to the `Header` component. When provided, a new `BarChart3` icon button is rendered in the right-side action group, placed next to the theme toggle (between the Phase 1 pill and the theme toggle button). Button uses `border border-border bg-background` outline styling on idle and `hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400` for the hover state (stays in the emerald palette). Includes `title` and `aria-label` for accessibility.
+  - When `onShowStats` is not provided, the button is simply not rendered — so the `Header` stays backwards-compatible for any other call sites.
+- `src/app/page.tsx`:
+  - Added `StatsDashboard` to the component imports.
+  - Added `showStats` state (`useState(false)`) next to `currentTags` with a doc comment explaining it's toggled from the header's BarChart3 button.
+  - Passed `onShowStats={() => setShowStats(true)}` to `<Header>`.
+  - Rendered `<StatsDashboard open={showStats} onClose={() => setShowStats(false)} />` after `<Footer />` (always mounted so the framer-motion exit animation can play on close — the component itself short-circuits when `open === false` thanks to the `AnimatePresence` wrapper).
+
+**Verification**:
+- `bun run lint` → exit code 0 ✓ (zero errors, zero warnings). First lint pass surfaced a `react-hooks/set-state-in-effect` rule violation on the initial `setLoading(true)` / `setError(null)` calls inside the fetch effect in `stats-dashboard.tsx`; fixed by wrapping the entire fetch flow in an async IIFE so the synchronous setState calls happen inside a microtask (deferred) rather than synchronously in the effect body.
+- Standalone logic test: extracted the `/api/stats` aggregation into a temporary script that called Prisma directly (mirroring the route's exact query + aggregation logic) and confirmed the numbers matched the live DB state: 3 snippets, 5 blocks, 15 lines, 850 chars, 1419 bytes, languages `{ r: 4, python: 1 }`, top-3 recent snippets (only 3 exist), oldest/newest timestamps correct.
+- Live HTTP test: started the dev server (`next dev --webpack -p 3000`) and ran `curl -s http://localhost:3000/api/stats | python3 -m json.tool | head -20` — got HTTP 200 with the exact same payload as the standalone test (compile 3.3s + render 40ms). The endpoint correctly returns all 9 fields specified in the task (`totalSnippets`, `totalBlocks`, `totalLines`, `totalChars`, `totalFileSize`, `languages`, `recentSnippets`, `oldestSnippet`, `newestSnippet`).
+- Dev server log shows clean compile of the new `/api/stats` route with the expected Prisma query (`SELECT ... FROM Snippet ORDER BY createdAt DESC`).
+
+Stage Summary:
+- Two new features shipped end-to-end with zero lint errors and a verified live API response.
+- **IPYNB export**: a 6th export button ("IPYNB" with `BookOpen` icon) joins the existing Download / ZIP / HTML / JSON quartet in the ResultPanel file header. Builds a canonical nbformat-4 / nbformat_minor-5 Jupyter notebook entirely client-side: a top-level markdown title cell (`# ${baseName}\nExtracted by CodeLooter — N blocks`), then for each block a markdown header cell (`## Block #N | lang | N lines`) followed by a code cell with the block's source split into lines (every line except the last carries a trailing `\n` per the nbformat spec). Declares the Python 3 kernel in metadata so JupyterLab / VS Code / Colab all open it cleanly. Downloaded as `${baseName}.ipynb` via a Blob with `type="application/json"`. Toast: `IPYNB dengan N blok dibuat`. Uses the `exportingIpynb` state for a per-button `Loader2` spinner.
+- **Snippet statistics dashboard**: a new `GET /api/stats` endpoint aggregates all stored snippets into `{ totalSnippets, totalBlocks, totalLines, totalChars, totalFileSize, languages, recentSnippets (top 5), oldestSnippet, newestSnippet }`. A new `StatsDashboard` modal (fixed overlay with backdrop, framer-motion enter/exit) opens from a new `BarChart3` icon button in the header (next to the theme toggle) and shows 4 stat cards (snippet / block / line / char counts), 3 secondary cards (file size + newest + oldest timestamps), a horizontal-bar language distribution chart (recharts, emerald/teal palette), and a top-5 recent snippets list with tag badges. Always-mounted in `page.tsx` so the exit animation can play; fetches fresh data from `/api/stats` on every open transition. Closes on backdrop click, X button, or Escape key. Empty state for zero snippets is handled.
+- All color usage stays within the emerald/teal palette — no blue or indigo introduced. The `LANG_COLORS` array cycles through 6 emerald/teal shades for the chart bars. Both new features are fully responsive: the stat-card grid is 2-up on mobile and 4-up on sm+, the secondary cards are 1-up on mobile and 3-up on sm+, the modal maxes out at `max-w-3xl` and scrolls internally when content exceeds the viewport (`max-h-[calc(90vh-72px)] overflow-y-auto`).
+- `bun run lint` passes with zero errors. Live API verified via curl — returns the expected aggregated JSON with HTTP 200.
+
+---
+Task ID: 11
+Agent: webDevReview (cron round 10)
+Task: Block annotations/notes + IPYNB export + snippet statistics dashboard.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-10) — Phase 1 extraction complete, bookmarking + tags autocomplete + snippet duplicate added in Task 10.
+- Performed QA: server stable, lint passes, 9/9 extraction checks pass. No new bugs found.
+- Focused this round on 3 new features from the Task 10 priority recommendations:
+
+**Feature 1: Block Annotations/Notes (Task 11-a, via subagent)**
+- Added `note?: string` to CodeBlock interface.
+- CodeBlockCard: StickyNote icon button in header (after bookmark star). Filled amber when note exists, outline when not. Amber dot indicator when note exists but note mode is off.
+- Note textarea below code area: `bg-amber-50 dark:bg-amber-950/20 border-amber-500/30`, placeholder "Tambahkan catatan untuk blok ini...".
+- Auto-saves on blur (only when draft differs from existing note — no spurious toasts). No explicit save button.
+- ResultPanel: `handleChangeNote` handler updates local state. Toast: "Catatan disimpan".
+- Passed through SortableBlockList for reorder mode.
+- Notes persist via existing `blocksJson` round-trip (no schema change needed).
+
+**Feature 2: IPYNB Export (Task 11-b, via subagent)**
+- Added "IPYNB" button to ResultPanel header (after JSON button) with `BookOpen` icon.
+- Builds canonical Jupyter notebook (nbformat 4, minor 5) with Python 3 kernel metadata.
+- Top-level markdown title cell, then per block: markdown header (`## Block #N | lang | N lines`) + code cell with source split into lines.
+- Client-side Blob download as `${base}.ipynb`. Toast: `IPYNB dengan N blok dibuat`.
+
+**Feature 3: Snippet Statistics Dashboard (Task 11-b, via subagent)**
+- New `GET /api/stats` endpoint: aggregates all snippets into `{totalSnippets, totalBlocks, totalLines, totalChars, totalFileSize, languages, recentSnippets, oldestSnippet, newestSnippet}`.
+- New `StatsDashboard` component: modal overlay with 4 stat cards (snippets/blocks/lines/chars), 3 secondary cards (file size + timestamps), horizontal-bar language chart (recharts), top-5 recent snippets list with tag badges.
+- Fetches `/api/stats` on open. Closes on backdrop click, X button, or Escape.
+- Header: BarChart3 icon button (next to theme toggle) opens the dashboard.
+- page.tsx: `showStats` state, StatsDashboard always-mounted for exit animation.
+
+- Verified all endpoints and features:
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - Stats API: returns correct aggregates (3 snippets, 5 blocks, languages: {r:4, python:1}) ✓
+  - All existing endpoints still work ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports block annotations/notes (personal notes per block), IPYNB export (Jupyter notebook format), and a snippet statistics dashboard (aggregate overview with charts). All API endpoints work correctly. Lint passes cleanly. 9/9 extraction checks pass.
+- **Completed modifications**: 3 new features (notes + IPYNB + stats dashboard). 3 new files (stats API route, stats-dashboard component, note in code-block-card). Modified result-panel.tsx, code-block-card.tsx, sortable-block-list.tsx, header.tsx, page.tsx, codelooter-api.ts. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server (webpack mode) is stable but crashes under browser load (4GB cgroup memory limit). All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): OCR progress indicator, clear UI separation
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add "compare two snippets" feature (diff view)
+  4. Add snippet folders/categories (beyond flat tags)
+  5. Add block line-wrap toggle (show/hide long lines)

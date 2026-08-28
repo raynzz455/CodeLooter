@@ -35,6 +35,10 @@ interface SortableBlockListProps {
   // available in reorder mode too (the handler is owned by ResultPanel so
   // the same local-state mutation path is used regardless of view).
   onToggleBookmark?: (index: number) => void;
+  // Note change forwarded to each CodeBlockCard so the note textarea is
+  // available in reorder mode too (auto-saves on blur — same handler
+  // as the normal view, owned by ResultPanel).
+  onChangeNote?: (index: number, note: string) => void;
 }
 
 // A single sortable wrapper that adds a drag handle to each CodeBlockCard.
@@ -48,6 +52,7 @@ function SortableItem({
   onDuplicate,
   onChangeLang,
   onToggleBookmark,
+  onChangeNote,
   isLast,
 }: {
   block: CodeBlock;
@@ -59,6 +64,7 @@ function SortableItem({
   onDuplicate?: (index: number) => void;
   onChangeLang?: (index: number, lang: string) => void;
   onToggleBookmark?: (index: number) => void;
+  onChangeNote?: (index: number, note: string) => void;
   isLast?: boolean;
 }) {
   const {
@@ -100,6 +106,7 @@ function SortableItem({
           onDuplicate={onDuplicate}
           onChangeLang={onChangeLang}
           onToggleBookmark={onToggleBookmark}
+          onChangeNote={onChangeNote}
           isLast={isLast}
         />
       </div>
@@ -118,6 +125,7 @@ export function SortableBlockList({
   onDuplicate,
   onChangeLang,
   onToggleBookmark,
+  onChangeNote,
 }: SortableBlockListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -166,6 +174,7 @@ export function SortableBlockList({
               onDuplicate={onDuplicate}
               onChangeLang={onChangeLang}
               onToggleBookmark={onToggleBookmark}
+              onChangeNote={onChangeNote}
               isLast={i === blocks.length - 1}
             />
           ))}

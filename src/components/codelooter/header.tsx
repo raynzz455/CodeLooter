@@ -1,9 +1,19 @@
 "use client";
 
-import { FileCode2, Github, Sparkles, Sun, Moon } from "lucide-react";
+import { FileCode2, Github, Sparkles, Sun, Moon, BarChart3 } from "lucide-react";
 import { useTheme } from "next-themes";
 
-export function Header() {
+interface HeaderProps {
+  /**
+   * Fired when the user clicks the "Stats" button. The parent (page.tsx)
+   * owns the modal visibility state and renders the `<StatsDashboard>`
+   * overlay — the header just signals intent so the button can stay in
+   * this otherwise stateless component.
+   */
+  onShowStats?: () => void;
+}
+
+export function Header({ onShowStats }: HeaderProps) {
   const { theme, setTheme } = useTheme();
 
   return (
@@ -28,6 +38,21 @@ export function Header() {
             <Sparkles className="h-3 w-3" />
             Phase 1 · extraction fix
           </span>
+          {/* Snippet statistics — opens the StatsDashboard modal. Placed next
+              to the theme toggle so the two are visually grouped as
+              "global actions" on the right edge of the header. The button is
+              optional: callers that don't pass `onShowStats` simply get no
+              button rendered (e.g. when used in a non-app context). */}
+          {onShowStats && (
+            <button
+              onClick={onShowStats}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-foreground transition-colors hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
+              title="Statistik snippet"
+              aria-label="Statistik snippet"
+            >
+              <BarChart3 className="h-4 w-4" />
+            </button>
+          )}
           {/* Dark mode toggle — both icons rendered, CSS controls visibility
               based on .dark class to avoid hydration mismatch. */}
           <button

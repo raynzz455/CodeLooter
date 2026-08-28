@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus, CheckSquare, Square, Star } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors, Trash2, CopyPlus, CheckSquare, Square, Star, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,15 @@ interface CodeBlockCardProps {
    * otherwise).
    */
   onToggleBookmark?: (index: number) => void;
+  /**
+   * Persist a personal note/annotation for this block. Fired on blur
+   * of the note textarea (auto-save — no explicit save button). The
+   * handler in ResultPanel updates `note` on the matching block in
+   * local state and shows a toast. The visual state is driven by
+   * `block.note` (filled amber StickyNote + amber dot indicator when
+   * a non-empty note exists, muted outline icon otherwise).
+   */
+  onChangeNote?: (index: number, note: string) => void;
   isLast?: boolean;
 }
 
@@ -134,7 +143,7 @@ export const TOKEN_CLASS: Record<string, string> = {
   nl: "",
 };
 
-export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, onChangeLang, selected, onToggleSelect, onToggleBookmark, isLast }: CodeBlockCardProps) {
+export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, onDelete, onDuplicate, onChangeLang, selected, onToggleSelect, onToggleBookmark, onChangeNote, isLast }: CodeBlockCardProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
@@ -142,6 +151,18 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
   const [splitMode, setSplitMode] = useState(false);
   const [splitLine, setSplitLine] = useState(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Note mode: when true, an amber textarea is rendered below the code
+  // area (only while not collapsed). `noteDraft` is the local working
+  // copy of `block.note` — it's committed back to the parent via
+  // `onChangeNote` on blur (auto-save). Syncs with `block.note` via
+  // the parent's key-based remount, mirroring the `draft`/`block.code`
+  // pattern documented above.
+  const [noteMode, setNoteMode] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(block.note ?? "");
+
+  // `hasNote` drives the icon's filled/highlighted state and the amber
+  // dot indicator. Whitespace-only notes are treated as no note.
+  const hasNote = !!(block.note && block.note.trim().length > 0);
 
   // NOTE: draft syncs with block.code via key-based remount in the parent
   // (ResultPanel passes key={result.filename + '-' + b.index}). This avoids
@@ -204,6 +225,19 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
     }
   };
 
+  // Auto-save the note on blur. The parent (ResultPanel) owns the toast
+  // so it can de-dupe (it only toasts when the value actually changed).
+  // We still guard here to avoid a no-op state write when the draft
+  // matches the persisted value (e.g. user clicked in and out without
+  // editing).
+  const handleNoteBlur = () => {
+    if (!onChangeNote) return;
+    const current = block.note ?? "";
+    if (noteDraft !== current) {
+      onChangeNote(block.index, noteDraft);
+    }
+  };
+
   return (
     <div
       className={`overflow-hidden rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md ${selected ? "border-emerald-500/50 ring-2 ring-emerald-500/40" : "border-border"}`}
@@ -256,6 +290,29 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
             className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent ${block.bookmarked ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground hover:text-foreground"}`}
           >
             <Star className={`h-3.5 w-3.5 ${block.bookmarked ? "fill-amber-400" : "fill-none"}`} />
+          </button>
+        )}
+        {/* Note toggle — sits after the bookmark star. StickyNote icon is
+            filled amber when a non-empty note exists, muted outline
+            otherwise. An amber dot indicator is shown on the button when
+            a note exists but note mode is off (so the user can tell at a
+            glance that this block has a hidden annotation). */}
+        {onChangeNote && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setNoteMode((m) => !m);
+            }}
+            aria-pressed={noteMode}
+            aria-label={hasNote ? `Lihat/ubah catatan blok #${block.index}` : `Tambah catatan blok #${block.index}`}
+            title={noteMode ? "Sembunyikan catatan" : (hasNote ? "Lihat/ubah catatan" : "Tambah catatan")}
+            className={`relative flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent ${hasNote ? "text-amber-400 hover:text-amber-500" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <StickyNote className={`h-3.5 w-3.5 ${hasNote ? "fill-amber-400" : "fill-none"}`} />
+            {hasNote && !noteMode && (
+              <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 ring-1 ring-card" />
+            )}
           </button>
         )}
         <span className="font-mono text-xs font-semibold text-muted-foreground">
@@ -426,6 +483,24 @@ export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, on
           <Button size="sm" className="h-7 bg-emerald-600 text-xs hover:bg-emerald-700" onClick={handleSave}>
             <Save className="h-3.5 w-3.5" /> Simpan
           </Button>
+        </div>
+      )}
+      {/* Note textarea — shown below the code area (and below the editing
+          save footer, when both are visible) only while note mode is on
+          and the card is not collapsed. Amber-tinted background + border
+          to visually distinguish it from code. Auto-saves on blur via
+          `onChangeNote` (no explicit save button). */}
+      {noteMode && !collapsed && onChangeNote && (
+        <div className="border-t border-amber-500/30 bg-amber-50 dark:bg-amber-950/20">
+          <textarea
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            onBlur={handleNoteBlur}
+            placeholder="Tambahkan catatan untuk blok ini..."
+            className="min-h-[60px] w-full resize-y bg-transparent px-3 py-2 text-xs leading-relaxed text-foreground outline-none placeholder:text-amber-700/60 dark:placeholder:text-amber-300/60"
+            spellCheck={false}
+            aria-label={`Catatan untuk blok #${block.index}`}
+          />
         </div>
       )}
     </div>

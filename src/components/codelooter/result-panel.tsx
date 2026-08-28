@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Star } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Star, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -63,6 +63,8 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   const [zipping, setZipping] = useState(false);
   const [exportingHtml, setExportingHtml] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
+  // IPYNB (Jupyter Notebook) export spinner — see `handleDownloadIpynb`.
+  const [exportingIpynb, setExportingIpynb] = useState(false);
   const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
   const [reorderMode, setReorderMode] = useState(false);
   // Tag input value (comma-separated). Synced from `currentTags` whenever
@@ -195,6 +197,26 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     // reflects the current render and `!b.bookmarked` matches the new state.
     const current = effectiveBlocks.find((b) => b.index === index);
     toast.info(current && !current.bookmarked ? "Blok ditandai" : "Bookmark dihapus");
+  };
+
+  // Persist a personal note/annotation for a block. Fired by CodeBlockCard
+  // on blur of the note textarea (auto-save — no explicit save button). The
+  // note is stored on `block.note` in local state, and — because the API
+  // routes round-trip the blocks JSON verbatim — it persists with the
+  // snippet when the user later clicks "Simpan" / "Update".
+  //
+  // The toast fires only when the note actually changed (compared against
+  // the pre-update `effectiveBlocks` value) so a no-op blur (user clicked
+  // in and out without editing) doesn't produce a spurious toast.
+  const handleChangeNote = (index: number, note: string) => {
+    const current = effectiveBlocks.find((b) => b.index === index);
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      return base.map((b) => (b.index === index ? { ...b, note } : b));
+    });
+    if (current && (current.note ?? "") !== note) {
+      toast.success("Catatan disimpan");
+    }
   };
 
   const handleSave = async () => {
@@ -528,6 +550,104 @@ ${sections}
       toast.error(e?.message ?? "Gagal membuat JSON");
     } finally {
       setExportingJson(false);
+    }
+  };
+
+  // Build a Jupyter Notebook (.ipynb) file containing one markdown header
+  // cell per code block followed by the code cell itself. The notebook
+  // follows nbformat 4 / nbformat_minor 5 and declares the Python 3 kernel
+  // in its metadata so JupyterLab / VS Code / Colab all open it cleanly.
+  //
+  // Each code cell's `source` is an array of strings — Jupyter expects every
+  // line except the last to end with `\n`. The same applies to the markdown
+  // header cells (we render `# Block #N | lang | N lines` as the title line).
+  //
+  // The export is built entirely client-side (no API round-trip) and
+  // downloaded as `${base}.ipynb` via a Blob. Loading state is mirrored with
+  // the other export buttons even though serialization is effectively
+  // instant — that way the button shows a consistent "Membuat…" affordance.
+  const handleDownloadIpynb = () => {
+    if (!result || effectiveBlocks.length === 0) return;
+    setExportingIpynb(true);
+    try {
+      const baseName = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+      // Split a string into Jupyter-style source lines: every line except
+      // the last gets a trailing "\n", and a final trailing "\n" is added so
+      // the cell renders with a blank line at the end (matches the canonical
+      // notebook layout that editors produce).
+      const toSourceLines = (s: string): string[] => {
+        const rawLines = s.split("\n");
+        // If the code ends with a newline, split() produces a trailing "" —
+        // drop it so we don't append an extra blank line.
+        if (rawLines.length > 0 && rawLines[rawLines.length - 1] === "") {
+          rawLines.pop();
+        }
+        // Every line except the last carries a trailing "\n" per the
+        // nbformat spec; the last line is bare.
+        return rawLines.map((l, i) => (i === rawLines.length - 1 ? l : l + "\n"));
+      };
+
+      // Title markdown cell — gives the notebook a clear top-level heading
+      // with the source filename and the total block count.
+      const titleLines = [
+        `# ${baseName}\n`,
+        `Extracted by CodeLooter — ${effectiveBlocks.length} blocks\n`,
+      ];
+
+      const cells: unknown[] = [
+        {
+          cell_type: "markdown",
+          metadata: {},
+          source: titleLines,
+        },
+      ];
+
+      for (const b of effectiveBlocks) {
+        // Per-block markdown header so the notebook reads as a structured
+        // document: each block is preceded by `# Block #N | lang | N lines`.
+        cells.push({
+          cell_type: "markdown",
+          metadata: {},
+          source: [
+            `## Block #${b.index} | ${b.lang} | ${b.lines} lines\n`,
+          ],
+        });
+        cells.push({
+          cell_type: "code",
+          execution_count: null,
+          metadata: {},
+          outputs: [],
+          source: toSourceLines(b.code),
+        });
+      }
+
+      const notebook = {
+        nbformat: 4,
+        nbformat_minor: 5,
+        metadata: {
+          kernelspec: {
+            display_name: "Python 3",
+            language: "python",
+            name: "python3",
+          },
+          language_info: { name: "python" },
+        },
+        cells,
+      };
+
+      const json = JSON.stringify(notebook, null, 2);
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseName}.ipynb`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`IPYNB dengan ${effectiveBlocks.length} blok dibuat`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal membuat IPYNB");
+    } finally {
+      setExportingIpynb(false);
     }
   };
 
@@ -885,6 +1005,20 @@ ${sections}
               {exportingJson ? <Loader2 className="h-4 w-4 animate-spin" /> : <Braces className="h-4 w-4" />}
               <span className="hidden sm:inline">{exportingJson ? "Membuat…" : "JSON"}</span>
             </Button>
+            {/* IPYNB (Jupyter Notebook) export — renders one markdown header
+                cell per code block + the code cell itself, all under a
+                top-level title markdown cell. Downloaded as `${base}.ipynb`
+                via a Blob. */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadIpynb}
+              disabled={effectiveBlocks.length === 0 || exportingIpynb}
+              title="Download sebagai Jupyter Notebook (.ipynb)"
+            >
+              {exportingIpynb ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />}
+              <span className="hidden sm:inline">{exportingIpynb ? "Membuat…" : "IPYNB"}</span>
+            </Button>
             {/* Comparison view toggle — only show if removedLines exist */}
             {result.stats?.removedLines && result.stats.removedLines.length > 0 && (
               <Button
@@ -1132,6 +1266,7 @@ ${sections}
           onDuplicate={handleDuplicate}
           onChangeLang={handleBlockLangChange}
           onToggleBookmark={handleToggleBookmark}
+          onChangeNote={handleChangeNote}
         />
       ) : filteredBlocks.length === 0 ? (
         // Empty state: the extraction produced blocks but the current
@@ -1186,6 +1321,7 @@ ${sections}
                 onDuplicate={handleDuplicate}
                 onChangeLang={handleBlockLangChange}
                 onToggleBookmark={handleToggleBookmark}
+                onChangeNote={handleChangeNote}
                 selected={selectedIndices.has(b.index)}
                 onToggleSelect={toggleSelect}
                 // Hide the "merge with next" button only when this block

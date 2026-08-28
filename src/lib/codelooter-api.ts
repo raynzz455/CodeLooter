@@ -13,6 +13,13 @@ export interface CodeBlock {
   // through unchanged). Undefined and `false` are treated the same
   // way (not bookmarked) by all consumers.
   bookmarked?: boolean;
+  // Free-form personal annotation the user attached to this block
+  // (e.g. "this is the key formula", "remember to change the data
+  // path"). Optional because the extraction pipeline doesn't set it —
+  // only the UI does, and it persists with the snippet when saved
+  // (the API routes round-trip the blocks JSON verbatim). Undefined
+  // and "" are treated the same way (no note) by all consumers.
+  note?: string;
 }
 
 export interface ExtractStats {

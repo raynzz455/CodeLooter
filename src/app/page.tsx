@@ -10,6 +10,7 @@ import { UploadPanel } from "@/components/codelooter/upload-panel";
 import { ResultPanel } from "@/components/codelooter/result-panel";
 import { SnippetList } from "@/components/codelooter/snippet-list";
 import { HistoryPanel } from "@/components/codelooter/history-panel";
+import { StatsDashboard } from "@/components/codelooter/stats-dashboard";
 import {
   extractFile,
   extractBatch,
@@ -92,6 +93,10 @@ export default function Home() {
   // for fresh extractions / batch results / history entries. Forwarded to
   // the ResultPanel as `currentTags` so the tag input is pre-populated.
   const [currentTags, setCurrentTags] = useState<string | undefined>(undefined);
+  // Stats dashboard modal visibility — toggled from the header's BarChart3
+  // button. The modal fetches aggregate counts from GET /api/stats on
+  // every open so the numbers always reflect the latest saved snippets.
+  const [showStats, setShowStats] = useState(false);
 
   const addHistoryEntry = useHistory((s) => s.addEntry);
 
@@ -275,7 +280,7 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <Header />
+      <Header onShowStats={() => setShowStats(true)} />
 
       {/* Hero / intro band */}
       <section className="relative overflow-hidden border-b border-border/60 bg-gradient-to-b from-emerald-500/5 via-background to-background">
@@ -492,6 +497,12 @@ export default function Home() {
       </AnimatePresence>
 
       <Footer />
+
+      {/* Snippet statistics dashboard — modal overlay opened from the
+          header's BarChart3 button. Always mounted so the framer-motion
+          exit animation can play on close. The component fetches its own
+          data from /api/stats every time `showStats` flips to true. */}
+      <StatsDashboard open={showStats} onClose={() => setShowStats(false)} />
     </div>
   );
 }
