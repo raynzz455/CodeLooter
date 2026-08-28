@@ -9,6 +9,7 @@ import { Footer } from "@/components/codelooter/footer";
 import { UploadPanel } from "@/components/codelooter/upload-panel";
 import { ResultPanel } from "@/components/codelooter/result-panel";
 import { SnippetList } from "@/components/codelooter/snippet-list";
+import { HistoryPanel } from "@/components/codelooter/history-panel";
 import {
   extractFile,
   extractBatch,
@@ -17,6 +18,7 @@ import {
   type SnippetDetail,
   type CodeBlock,
 } from "@/lib/codelooter-api";
+import { useHistory } from "@/lib/extraction-history";
 
 // Built-in sample that demonstrates all four Phase 1 fixes:
 //   - line-wrap (biaya_promosi vector split across lines)
@@ -81,6 +83,8 @@ export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  const addHistoryEntry = useHistory((s) => s.addEntry);
+
   const handleExtract = useCallback(async (file: File, lang: string) => {
     setLoading(true);
     setResult(null);
@@ -88,6 +92,7 @@ export default function Home() {
     try {
       const r = await extractFile(file, lang);
       setResult(r);
+      addHistoryEntry(r);
       if (r.total === 0) {
         toast.warning("Tidak ada blok kode terdeteksi");
       } else {
@@ -98,7 +103,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [addHistoryEntry]);
 
   const handleBatchExtract = useCallback(async (files: File[], lang: string) => {
     setLoading(true);
@@ -107,6 +112,17 @@ export default function Home() {
     try {
       const results = await extractBatch(files, lang);
       setBatchResults(results);
+      // Add each successful batch result to session history as a separate entry.
+      for (const r of results) {
+        if (r.error) continue;
+        addHistoryEntry({
+          blocks: r.blocks,
+          filename: r.filename,
+          size: r.size,
+          total: r.total,
+          stats: r.stats,
+        });
+      }
       const totalBlocks = results.reduce((sum, r) => sum + r.total, 0);
       const errors = results.filter((r) => r.error).length;
       if (errors > 0) {
@@ -119,7 +135,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [addHistoryEntry]);
 
   const handleLoadSample = useCallback(async () => {
     const file = new File([SAMPLE], "modul3_sample.txt", { type: "text/plain" });
@@ -130,6 +146,11 @@ export default function Home() {
     setResult(null);
     setBatchResults(null);
     toast.info("Hasil dibersihkan");
+  }, []);
+
+  const handleSelectHistory = useCallback((r: ExtractResult) => {
+    setResult(r);
+    setBatchResults(null);
   }, []);
 
   const handleSelectSnippet = useCallback((detail: SnippetDetail) => {
@@ -290,6 +311,14 @@ export default function Home() {
               className="rounded-xl border border-border bg-card p-4 shadow-sm"
             >
               <SnippetList refreshKey={refreshKey} onSelect={handleSelectSnippet} />
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.25, delay: 0.1 }}
+              className="rounded-xl border border-border bg-card p-4 shadow-sm"
+            >
+              <HistoryPanel onSelect={handleSelectHistory} />
             </motion.div>
           </aside>
 

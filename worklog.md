@@ -335,3 +335,150 @@ Stage Summary:
   3. Add "extraction history" — track all extractions in current session for quick re-access
   4. Add block merge/split operations (manually merge two blocks or split one)
   5. Add export to HTML (syntax-highlighted HTML file with all blocks)
+
+---
+Task ID: 6-b
+Agent: full-stack-developer
+Task: Add extraction history (session-based quick re-access via Zustand)
+
+Work Log:
+- Read prior worklog (Tasks 1-5 done) and reviewed existing sidebar structure in src/app/page.tsx (Upload card + SnippetList card) and SnippetList component (snippet-list.tsx) to match visual style (rounded card, header with icon + count, max-h-80 scroll, timeAgo helper, emerald hover palette).
+- Created Zustand store `src/lib/extraction-history.ts`:
+  - `useHistory` store with `entries: HistoryEntry[]`, `addEntry`, `removeEntry`, `clearAll`.
+  - `HistoryEntry` = `{ id, result: ExtractResult, timestamp }`.
+  - `addEntry` prepends new entry and slices to last 20 (HISTORY_MAX_ENTRIES = 20).
+  - ID generated via `crypto.randomUUID()` with timestamp+random fallback for older runtimes.
+  - Marked `"use client"` and explicitly in-memory (no persistence) per task spec.
+- Created `src/components/codelooter/history-panel.tsx`:
+  - Header: `Clock` icon (lucide) + "Riwayat ekstraksi" title + entry count + "Bersihkan" button (Trash2 icon).
+  - Helper subtitle clarifying "Sesi ini saja — tidak disimpan".
+  - Empty state: dashed border, Clock icon, "Belum ada riwayat." with secondary line.
+  - List: `max-h-80 overflow-y-auto`, framer-motion `AnimatePresence` + `layout` for add/remove animations (initial opacity/y/height 0 → animate in; exit x+12 to right with height collapse).
+  - Each entry: FileCode icon, mono-truncated filename, Badge with block count, timeAgo text (same lightweight style as snippet-list — no date-fns), small `cache` tag if result was cached, and a ghost X button for per-entry removal (stopPropagation to avoid triggering select).
+  - Click handler: sets `flashId` for 350ms to animate emerald background via framer-motion `animate.backgroundColor`, then calls `onSelect(result)` + toast.success.
+  - Clear-all: clears store + toast.info.
+  - Keyboard accessible (role=button, tabIndex=0, Enter/Space handler).
+- Integrated into `src/app/page.tsx`:
+  - Imported `HistoryPanel` and `useHistory` from `@/lib/extraction-history`.
+  - Selected `addHistoryEntry = useHistory((s) => s.addEntry)` (selector subscription so component re-renders only on addEntry identity change).
+  - `handleExtract`: calls `addHistoryEntry(r)` right after `setResult(r)`. Added `addHistoryEntry` to useCallback deps.
+  - `handleBatchExtract`: iterates over `results`, skips entries with `r.error`, and adds each successful batch result to history as a separate `ExtractResult` (blocks/filename/size/total/stats). Added `addHistoryEntry` to useCallback deps.
+  - Added `handleSelectHistory(r)` callback that sets `result` and clears `batchResults` so the ResultPanel renders the restored extraction.
+  - Placed `<HistoryPanel onSelect={handleSelectHistory} />` as a third card in the left sidebar, below SnippetList, wrapped in the same `rounded-xl border bg-card p-4 shadow-sm` motion.div with stagger delay 0.1s.
+- Verified with `bun run lint` — passes cleanly with no errors/warnings.
+- Verified dev server log — page compiles and serves (GET / 200, POST /api/extract 200), no runtime errors.
+
+Stage Summary:
+- **New feature**: Session-based extraction history. Every extraction (single or batch file) is now captured in an in-memory Zustand store and surfaced as a third sidebar card. Users can click any past entry to instantly restore its full result (blocks, filename, stats) into the ResultPanel without re-uploading.
+- **Files created**:
+  - `src/lib/extraction-history.ts` — Zustand store (`useHistory`, max 20 entries, in-memory only).
+  - `src/components/codelooter/history-panel.tsx` — UI with framer-motion add/remove animations, click-to-flash-emerald-then-restore, per-entry X removal, clear-all button, empty state, max-h-80 scroll, emerald/teal palette matching the rest of the app.
+- **Files modified**:
+  - `src/app/page.tsx` — imported store + panel, wired `addEntry` into `handleExtract` and `handleBatchExtract`, added `handleSelectHistory` callback, placed `HistoryPanel` as third sidebar card.
+- **Quality**: `bun run lint` clean. No blue/indigo colors used. Reuses existing shadcn Button/Badge, lucide-react (Clock/X/FileCode/Trash2), framer-motion, sonner. TypeScript strict throughout.
+- **Behavior notes**: History is intentionally session-scoped (cleared on refresh) per the task's "in-memory, not persisted" constraint. Batch results with errors are skipped from history. Restoring from history clears any open batch-results view so the ResultPanel shows the selected extraction directly.
+
+---
+Task ID: 6-a
+Agent: full-stack-developer
+Task: Add HTML export feature (syntax-highlighted standalone HTML)
+
+Work Log:
+- Read worklog.md (Tasks 1-5) to understand prior work: Phase 1 extraction stable, ZIP + comparison view (Task 4), copy-as-markdown + drag-and-drop reorder + extraction presets (Task 5). "Export to HTML" was listed as priority recommendation #5 in the Task 5 review.
+- Read `src/components/codelooter/result-panel.tsx` and `src/components/codelooter/code-block-card.tsx` to understand the existing button-group layout, the `zipping` state pattern, the lightweight `highlight()` tokenizer, and the `TOKEN_CLASS` Tailwind colour map.
+- Verified `FileCode2` icon exists in lucide-react (it does, alongside `Code2`).
+- **Modified `src/components/codelooter/code-block-card.tsx`** (Option A — export rather than copy):
+  - Added `export` keyword to the `Token` interface.
+  - Added `export` keyword to the `highlight()` function.
+  - Added `export` keyword to the `TOKEN_CLASS` constant.
+  - No other changes — the existing in-app rendering is untouched.
+- **Modified `src/components/codelooter/result-panel.tsx`**:
+  - Added `FileCode2` to the lucide-react import list.
+  - Added `highlight, TOKEN_CLASS` to the `./code-block-card` import.
+  - Added `exportingHtml` state alongside the existing `zipping` state.
+  - Implemented `handleDownloadHtml()`:
+    - Builds a `escapeHtml()` helper that escapes `&`, `<`, `>`, `"`, `'`.
+    - Builds an inline-style colour map `HTML_COLOR` typed as `Record<keyof typeof TOKEN_CLASS, ...>` (so it stays in sync with the upstream token categories). Colours mirror the in-app dark-mode palette: comment slate-400 italic, string emerald-400, number amber-400, keyword rose-400 bold, func teal-400, ident slate-200, op slate-400. No blue/indigo.
+    - Builds a `renderCode(b)` helper that runs `highlight(b.code, b.lang)`, HTML-escapes each token's text, and wraps it in `<span style="...">`.
+    - Builds one `<section class="block">` per block with a header showing `#index`, language badge (emerald pill), and `N lines`, followed by `<pre><code>` containing the highlighted spans.
+    - Wraps everything in a full `<!DOCTYPE html>` document with inline `<style>`: dark background `#0f172a`, text `#e2e8f0`, code-bg `#1e293b`, borders `#334155`, emerald/teal accents on the language pill, max-width 960px container, horizontal scroll for long lines (`overflow-x: auto` on `pre`), `word-break: break-all` on the title.
+    - Creates a Blob with `type="text/html;charset=utf-8"`, triggers download as `${baseName}_blocks.html`.
+    - Toast on success: `HTML dengan N blok dibuat`. Toast on error: `Gagal membuat HTML`.
+    - `setExportingHtml(true/false)` around the try/finally for loading state.
+  - Added the new "HTML" button in the file-header button group, immediately after the "ZIP" button:
+    - `variant="outline"` (matches ZIP).
+    - `title="Download semua blok sebagai file HTML syntax-highlighted"`.
+    - Icon: `FileCode2` (or `Loader2` spinner when `exportingHtml`).
+    - Label "HTML" hidden on mobile via `hidden sm:inline` (icon always visible), label switches to "Membuat…" while exporting.
+    - `disabled` when `effectiveBlocks.length === 0 || exportingHtml`.
+- Verified: `bun run lint` passes cleanly (exit code 0, no errors or warnings).
+- Wrote work record to `/home/z/my-project/agent-ctx/6-a-full-stack-developer.md`.
+
+Stage Summary:
+- **HTML export feature is complete and verified.** The ResultPanel file-header button group now offers an "HTML" button right after the existing "ZIP" button. Clicking it downloads a single self-contained `.html` file (named `${filename without ext}_blocks.html`) that contains all extracted code blocks with inline syntax highlighting, dark-theme styling, and per-block headers — openable in any browser, no external dependencies, works offline.
+- **Output file characteristics**:
+  - Self-contained: every style inlined in a `<style>` tag, no CSS/JS CDN links.
+  - Dark theme: bg `#0f172a` (slate-900), text `#e2e8f0` (slate-200), code-bg `#1e293b` (slate-800).
+  - Responsive: max-width 960px container, horizontal scroll for long code lines, `word-break: break-all` on the title for long filenames.
+  - Syntax highlighting reuses the in-app `highlight()` tokenizer — same token categories as `code-block-card.tsx`, with inline `style="color:..."` attributes mirroring the Tailwind dark-mode colours.
+  - Per-block header: `#index`, language pill (emerald accent), line count.
+  - HTML-escaped: `<`, `>`, `&`, `"`, `'` all escaped before insertion into `<code>` to prevent injection / broken rendering.
+- **Colour palette compliance**: strictly emerald / teal / amber / rose / slate — NO blue or indigo.
+- **UX consistency**: same `variant="outline"` styling as the ZIP button, same `Loader2` spinner + "Membuat…" label pattern during export, same disabled-when-empty behaviour, same `hidden sm:inline` responsive label pattern.
+- **Architecture choice (Option A)**: exported `highlight`, `TOKEN_CLASS`, and `Token` from `code-block-card.tsx` rather than copying the logic to a shared util — keeps a single source of truth for the tokenizer. The `HTML_COLOR` map is typed against `keyof typeof TOKEN_CLASS` so a future token-category addition will surface as a TypeScript error here.
+- **Files modified**: 2 (`code-block-card.tsx`, `result-panel.tsx`). No backend changes — the HTML is generated entirely client-side from the already-extracted blocks, so no API route is needed.
+- `bun run lint` passes cleanly (exit code 0).
+
+---
+Task ID: 6
+Agent: webDevReview (cron round 5)
+Task: Block merge/split + HTML export + extraction history.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-5) — Phase 1 extraction complete, drag-and-drop reordering + markdown export + presets added in Task 5.
+- Performed QA: server stable, lint passes, 9/9 extraction checks pass, all API endpoints work. No new bugs found.
+- Focused this round on 3 new features from the Task 5 priority recommendations:
+
+**Feature 1: HTML Export (Task 6-a, via subagent)**
+- Added "HTML" button to ResultPanel header (after ZIP button).
+- Exports a self-contained syntax-highlighted HTML file with dark theme (#0f172a bg, #e2e8f0 text).
+- Reuses the `highlight()` function from code-block-card (now exported with `TOKEN_CLASS`).
+- Each block rendered as a `<section>` with header (index, language pill, line count) + `<pre><code>` with highlighted spans.
+- HTML-escapes all code content. Inline `<style>` for portability. Toast on success.
+- New `exportingHtml` state for loading spinner.
+
+**Feature 2: Extraction History (Task 6-b, via subagent)**
+- Created Zustand store `src/lib/extraction-history.ts` (in-memory, session-scoped, max 20 entries, `crypto.randomUUID()` IDs).
+- Created `src/components/codelooter/history-panel.tsx`: sidebar panel with entry list, time-ago, remove buttons, clear-all.
+- framer-motion AnimatePresence for add/remove animations. Click entry → 350ms emerald flash → restore result.
+- Integrated into page.tsx: placed as third card in left sidebar below SnippetList. `addEntry` called on every extraction (single + batch).
+
+**Feature 3: Block Merge/Split Operations (implemented directly)**
+- **CodeBlockCard** extended with `onMergeWithNext`, `onSplit`, `isLast` props.
+- New buttons in card header: GitMerge (merge with next, hidden on last block) and Scissors (split block, only if >1 line).
+- **Split mode UI**: amber-tinted control bar with line-number input. The target line is highlighted in the line-number gutter. Validates 2 ≤ atLine < lineCount.
+- **ResultPanel** handlers:
+  - `handleMergeWithNext(index)`: concatenates block N's code with block N+1's code, renumbers indices.
+  - `handleSplit(index, atLine)`: splits block at given line into two blocks, renumbers indices. New block gets source="split".
+- Both handlers passed to CodeBlockCard in normal view AND SortableBlockList in reorder view.
+- Added "split-manual" to SOURCE_LABEL map for the split source badge.
+- Updated SortableBlockList props to pass merge/split handlers through to SortableItem → CodeBlockCard.
+
+- Verified all endpoints and features:
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - Batch API: 2 files → 2 results ✓
+  - Browser: page loads with preset buttons + history panel, no console errors ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports block merge/split operations, HTML export, and session-based extraction history. All API endpoints work correctly. Lint passes cleanly.
+- **Completed modifications**: 3 new features (merge/split + HTML export + extraction history), 2 new files (extraction-history.ts, history-panel.tsx), 2 modified components (code-block-card.tsx with merge/split UI, result-panel.tsx with merge/split handlers + HTML button), code-block-card exports highlight function. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit). All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): inline snippet editor in snippet detail, OCR progress indicator
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add block delete operation (remove a block entirely)
+  4. Add "duplicate block" operation
+  5. Add keyboard shortcuts for merge/split (e.g., M for merge, S for split)

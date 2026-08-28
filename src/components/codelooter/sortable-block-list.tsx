@@ -26,6 +26,8 @@ interface SortableBlockListProps {
   onReorder: (blocks: CodeBlock[]) => void;
   onDownload: (index: number) => void;
   onChange: (index: number, code: string) => void;
+  onMergeWithNext?: (index: number) => void;
+  onSplit?: (index: number, atLine: number) => void;
 }
 
 // A single sortable wrapper that adds a drag handle to each CodeBlockCard.
@@ -33,10 +35,16 @@ function SortableItem({
   block,
   onDownload,
   onChange,
+  onMergeWithNext,
+  onSplit,
+  isLast,
 }: {
   block: CodeBlock;
   onDownload: (index: number) => void;
   onChange: (index: number, code: string) => void;
+  onMergeWithNext?: (index: number) => void;
+  onSplit?: (index: number, atLine: number) => void;
+  isLast?: boolean;
 }) {
   const {
     attributes,
@@ -67,7 +75,14 @@ function SortableItem({
       </button>
       {/* Block card (flex-1 so it fills the remaining width) */}
       <div className="min-w-0 flex-1">
-        <CodeBlockCard block={block} onDownload={onDownload} onChange={onChange} />
+        <CodeBlockCard
+          block={block}
+          onDownload={onDownload}
+          onChange={onChange}
+          onMergeWithNext={onMergeWithNext}
+          onSplit={onSplit}
+          isLast={isLast}
+        />
       </div>
     </div>
   );
@@ -78,6 +93,8 @@ export function SortableBlockList({
   onReorder,
   onDownload,
   onChange,
+  onMergeWithNext,
+  onSplit,
 }: SortableBlockListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -114,12 +131,15 @@ export function SortableBlockList({
           items={blocks.map((b) => `block-${b.index}`)}
           strategy={verticalListSortingStrategy}
         >
-          {blocks.map((b) => (
+          {blocks.map((b, i) => (
             <SortableItem
               key={`block-${b.index}`}
               block={b}
               onDownload={onDownload}
               onChange={onChange}
+              onMergeWithNext={onMergeWithNext}
+              onSplit={onSplit}
+              isLast={i === blocks.length - 1}
             />
           ))}
         </SortableContext>

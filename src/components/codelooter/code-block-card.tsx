@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Copy, Check, Download, Pencil, Save, X, ChevronDown, ChevronRight, GitMerge, Scissors } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,9 @@ interface CodeBlockCardProps {
   block: CodeBlockType;
   onDownload: (index: number) => void;
   onChange: (index: number, code: string) => void;
+  onMergeWithNext?: (index: number) => void;
+  onSplit?: (index: number, atLine: number) => void;
+  isLast?: boolean;
 }
 
 const LANG_LABEL: Record<string, string> = {
@@ -24,6 +27,7 @@ const SOURCE_LABEL: Record<string, string> = {
   pattern: "marker", "pattern-split": "split", "scan-fallback": "scan",
   density: "density", fenced: "fenced", html: "html", ipynb: "ipynb",
   latex: "latex", "txt-pattern": "txt", "pattern+merge": "marker+merge",
+  split: "split-manual", "marker+merge": "marker+merge",
 };
 
 // Lightweight regex-based syntax highlighting. Handles comments, strings,
@@ -36,9 +40,9 @@ const KEYWORDS = new Set([
   "SELECT", "FROM", "WHERE", "JOIN", "INSERT", "UPDATE", "DELETE", "CREATE",
 ]);
 
-interface Token { t: string; c: string }
+export interface Token { t: string; c: string }
 
-function highlight(code: string, lang: string): Token[] {
+export function highlight(code: string, lang: string): Token[] {
   const tokens: Token[] = [];
   // Comment detection depends on language family.
   const lineComment = lang === "r" || lang === "python" || lang === "bash" ? "#" :
@@ -92,7 +96,7 @@ function highlight(code: string, lang: string): Token[] {
   return tokens;
 }
 
-const TOKEN_CLASS: Record<string, string> = {
+export const TOKEN_CLASS: Record<string, string> = {
   comment: "text-slate-500 italic dark:text-slate-400",
   string: "text-emerald-600 dark:text-emerald-400",
   number: "text-amber-600 dark:text-amber-400",
@@ -103,11 +107,13 @@ const TOKEN_CLASS: Record<string, string> = {
   nl: "",
 };
 
-export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProps) {
+export function CodeBlockCard({ block, onDownload, onChange, onMergeWithNext, onSplit, isLast }: CodeBlockCardProps) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(block.code);
   const [collapsed, setCollapsed] = useState(false);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitLine, setSplitLine] = useState(1);
 
   // NOTE: draft syncs with block.code via key-based remount in the parent
   // (ResultPanel passes key={result.filename + '-' + b.index}). This avoids
@@ -138,6 +144,23 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
     setEditing(false);
   };
 
+  const handleMerge = () => {
+    if (onMergeWithNext) {
+      onMergeWithNext(block.index);
+      toast.success("Blok digabung dengan blok berikutnya");
+    }
+  };
+
+  const handleSplitConfirm = () => {
+    if (onSplit && splitLine > 1 && splitLine < lineCount) {
+      onSplit(block.index, splitLine);
+      toast.success(`Blok dipisah pada baris ${splitLine}`);
+    } else {
+      toast.error("Pilih baris antara 2 dan " + (lineCount - 1));
+    }
+    setSplitMode(false);
+  };
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
@@ -162,6 +185,26 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
           {SOURCE_LABEL[block.source] ?? block.source}
         </Badge>
         <div className="ml-auto flex items-center gap-1">
+          {/* Merge with next block — only if not last and handler provided */}
+          {onMergeWithNext && !isLast && (
+            <Button
+              size="sm" variant="ghost" className="h-7 px-2 text-xs"
+              onClick={handleMerge}
+              title="Gabung dengan blok berikutnya"
+            >
+              <GitMerge className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {/* Split block — only if handler provided and block has >1 line */}
+          {onSplit && lineCount > 1 && (
+            <Button
+              size="sm" variant="ghost" className="h-7 px-2 text-xs"
+              onClick={() => { setSplitMode((s) => !s); setSplitLine(Math.min(2, lineCount - 1)); }}
+              title={splitMode ? "Batal pisah" : "Pisah blok"}
+            >
+              <Scissors className="h-3.5 w-3.5" />
+            </Button>
+          )}
           <Button
             size="sm" variant="ghost" className="h-7 px-2 text-xs"
             onClick={() => setEditing((e) => !e)}
@@ -183,6 +226,30 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
           </Button>
         </div>
       </div>
+      {/* Split mode controls */}
+      {splitMode && !collapsed && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+          <Scissors className="h-3.5 w-3.5 text-amber-600" />
+          <span className="text-amber-700 dark:text-amber-300">Pisah pada baris:</span>
+          <input
+            type="number"
+            min={2}
+            max={lineCount - 1}
+            value={splitLine}
+            onChange={(e) => setSplitLine(parseInt(e.target.value, 10) || 2)}
+            className="h-6 w-16 rounded border border-input bg-background px-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+          />
+          <span className="text-muted-foreground">dari {lineCount}</span>
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setSplitMode(false)}>
+              Batal
+            </Button>
+            <Button size="sm" className="h-6 bg-amber-600 px-2 text-[11px] hover:bg-amber-700" onClick={handleSplitConfirm}>
+              <Scissors className="h-3 w-3" /> Pisah
+            </Button>
+          </div>
+        </div>
+      )}
       {!collapsed && (
         <div className="relative max-h-96 overflow-auto bg-slate-950/95 dark:bg-black/40">
           {editing ? (
@@ -197,7 +264,12 @@ export function CodeBlockCard({ block, onDownload, onChange }: CodeBlockCardProp
               {/* Line numbers */}
               <div className="select-none border-r border-white/5 py-3 pl-3 pr-2 text-right font-mono text-[11px] leading-relaxed text-slate-600">
                 {Array.from({ length: lineCount }, (_, i) => (
-                  <div key={i}>{i + 1}</div>
+                  <div
+                    key={i}
+                    className={splitMode && i + 1 === splitLine ? "bg-amber-500/30 text-amber-300" : ""}
+                  >
+                    {i + 1}
+                  </div>
                 ))}
               </div>
               {/* Code */}

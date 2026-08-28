@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
 import { saveSnippet } from "@/lib/codelooter-api";
-import { CodeBlockCard } from "./code-block-card";
+import { CodeBlockCard, highlight, TOKEN_CLASS } from "./code-block-card";
 import { StatsBar } from "./stats-bar";
 import { StatsChart } from "./stats-chart";
 import { LoadingSkeleton } from "./loading-skeleton";
@@ -26,6 +26,7 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedMd, setCopiedMd] = useState(false);
   const [zipping, setZipping] = useState(false);
+  const [exportingHtml, setExportingHtml] = useState(false);
   const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
   const [reorderMode, setReorderMode] = useState(false);
 
@@ -137,6 +138,183 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
     }
   };
 
+  // Build a self-contained, syntax-highlighted HTML file with all extracted
+  // code blocks. Reuses the lightweight `highlight()` tokenizer from
+  // code-block-card so the exported colours match the in-app dark-mode view.
+  // No external CSS / JS — every style is inlined so the file works offline.
+  const handleDownloadHtml = () => {
+    if (!result || effectiveBlocks.length === 0) return;
+    setExportingHtml(true);
+    try {
+      // HTML-escape every text node before it lands inside <code>.
+      const escapeHtml = (s: string): string =>
+        s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      // Inline-style palette mirroring TOKEN_CLASS dark-mode colours.
+      // Typed against `keyof typeof TOKEN_CLASS` so this stays in sync if a
+      // new token category is added upstream. Strictly emerald / teal / amber
+      // / rose / slate — no blue or indigo.
+      const HTML_COLOR: Record<keyof typeof TOKEN_CLASS, { color: string; extra?: string }> = {
+        comment: { color: "#94a3b8", extra: "font-style: italic;" }, // slate-400
+        string:  { color: "#34d399" },                              // emerald-400
+        number:  { color: "#fbbf24" },                              // amber-400
+        keyword: { color: "#fb7185", extra: "font-weight: 600;" },  // rose-400
+        func:    { color: "#2dd4bf" },                              // teal-400
+        ident:   { color: "#e2e8f0" },                              // slate-200
+        op:      { color: "#94a3b8" },                              // slate-400
+        nl:      { color: "inherit" },
+      };
+
+      // Render a single block's code to highlighted, escaped HTML spans.
+      const renderCode = (b: CodeBlock): string => {
+        const toks = highlight(b.code, b.lang);
+        return toks
+          .map((tk) => {
+            const esc = escapeHtml(tk.t);
+            const cfg = HTML_COLOR[tk.c] ?? HTML_COLOR.ident;
+            if (tk.c === "nl") return esc;
+            const style = cfg.extra
+              ? `color:${cfg.color};${cfg.extra}`
+              : `color:${cfg.color}`;
+            return `<span style="${style}">${esc}</span>`;
+          })
+          .join("");
+      };
+
+      const baseName = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+      const today = new Date().toISOString().slice(0, 10);
+
+      const sections = effectiveBlocks
+        .map((b) => {
+          const langLabel = (b.lang || "text").toUpperCase();
+          return `    <section class="block">
+      <header class="block-head">
+        <span class="idx">#${b.index}</span>
+        <span class="lang">${escapeHtml(langLabel)}</span>
+        <span class="meta">${b.lines} lines</span>
+      </header>
+      <pre><code>${renderCode(b)}</code></pre>
+    </section>`;
+        })
+        .join("\n");
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(baseName)} — CodeLooter Export</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 1.5rem 1rem 3rem;
+      line-height: 1.5;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0 0 .25rem;
+      color: #f8fafc;
+      word-break: break-all;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: .875rem;
+      margin: 0 0 1.5rem;
+    }
+    .block {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: .6rem;
+      margin: 0 0 1rem;
+      overflow: hidden;
+    }
+    .block-head {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .6rem .9rem;
+      background: #0f172a;
+      border-bottom: 1px solid #334155;
+      font-size: .8rem;
+    }
+    .block-head .idx {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    .block-head .lang {
+      background: rgba(16,185,129,.15);
+      color: #6ee7b7;
+      padding: .15rem .5rem;
+      border-radius: 999px;
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .03em;
+    }
+    .block-head .meta {
+      color: #64748b;
+      font-size: .75rem;
+    }
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow-x: auto;
+      background: #0f172a;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .82rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+      white-space: pre;
+    }
+    .footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid #334155;
+      color: #64748b;
+      font-size: .75rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>${escapeHtml(result.filename)}</h1>
+    <p class="subtitle">${effectiveBlocks.length} blok kode · ${totalLines} baris · dihasilkan oleh CodeLooter</p>
+${sections}
+    <div class="footer">Diekspor dari CodeLooter — ${today}</div>
+  </div>
+</body>
+</html>`;
+
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseName}_blocks.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`HTML dengan ${effectiveBlocks.length} blok dibuat`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal membuat HTML");
+    } finally {
+      setExportingHtml(false);
+    }
+  };
+
   const handleBlockDownload = (index: number) => {
     const b = effectiveBlocks.find((x) => x.index === index);
     if (!b) return;
@@ -163,6 +341,44 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const handleReorder = (reordered: CodeBlock[]) => {
     setBlocks(reordered.map((b, i) => ({ ...b, index: i })));
     toast.info("Urutan blok diperbarui");
+  };
+
+  // Merge block at `index` with the next block. The two blocks' code is
+  // concatenated with a newline, and indices are renumbered.
+  const handleMergeWithNext = (index: number) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      const idx = base.findIndex((b) => b.index === index);
+      if (idx < 0 || idx >= base.length - 1) return base;
+      const merged = {
+        ...base[idx],
+        code: base[idx].code + "\n" + base[idx + 1].code,
+        lines: base[idx].lines + base[idx + 1].lines,
+        source: base[idx].source === base[idx + 1].source
+          ? base[idx].source
+          : `${base[idx].source}+merge`,
+      };
+      const next = [...base.slice(0, idx), merged, ...base.slice(idx + 2)];
+      return next.map((b, i) => ({ ...b, index: i }));
+    });
+  };
+
+  // Split block at `index` into two blocks at line `atLine`. Lines 1..atLine-1
+  // stay in the first block, lines atLine..end go to a new second block.
+  const handleSplit = (index: number, atLine: number) => {
+    setBlocks((prev) => {
+      const base = prev ?? result?.blocks ?? [];
+      const idx = base.findIndex((b) => b.index === index);
+      if (idx < 0) return base;
+      const lines = base[idx].code.split("\n");
+      if (atLine < 2 || atLine >= lines.length) return base;
+      const firstCode = lines.slice(0, atLine).join("\n");
+      const secondCode = lines.slice(atLine).join("\n");
+      const first = { ...base[idx], code: firstCode, lines: firstCode.split("\n").length };
+      const second = { ...base[idx], code: secondCode, lines: secondCode.split("\n").length, source: "split" };
+      const next = [...base.slice(0, idx), first, second, ...base.slice(idx + 1)];
+      return next.map((b, i) => ({ ...b, index: i }));
+    });
   };
 
   const handleCopyAll = async () => {
@@ -287,6 +503,16 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
               {zipping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />}
               <span className="hidden sm:inline">{zipping ? "Zipping…" : "ZIP"}</span>
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadHtml}
+              disabled={effectiveBlocks.length === 0 || exportingHtml}
+              title="Download semua blok sebagai file HTML syntax-highlighted"
+            >
+              {exportingHtml ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCode2 className="h-4 w-4" />}
+              <span className="hidden sm:inline">{exportingHtml ? "Membuat…" : "HTML"}</span>
+            </Button>
             {/* Comparison view toggle — only show if removedLines exist */}
             {result.stats?.removedLines && result.stats.removedLines.length > 0 && (
               <Button
@@ -359,10 +585,12 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
           onReorder={handleReorder}
           onDownload={handleBlockDownload}
           onChange={handleBlockChange}
+          onMergeWithNext={handleMergeWithNext}
+          onSplit={handleSplit}
         />
       ) : (
         <AnimatePresence mode="popLayout">
-          {effectiveBlocks.map((b) => (
+          {effectiveBlocks.map((b, i) => (
             <motion.div
               key={`${result.filename}-${b.index}`}
               layout
@@ -375,6 +603,9 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
                 block={b}
                 onDownload={handleBlockDownload}
                 onChange={handleBlockChange}
+                onMergeWithNext={handleMergeWithNext}
+                onSplit={handleSplit}
+                isLast={i === effectiveBlocks.length - 1}
               />
             </motion.div>
           ))}
