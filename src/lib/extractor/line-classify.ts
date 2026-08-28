@@ -11,15 +11,29 @@ import { R_SIGNALS } from "./langdetect";
 // Common Indonesian + English prose words. A line with a high ratio of these
 // is narrative, not code.
 const PROSE_WORDS = new Set<string>([
-  // Indonesian
+  // Indonesian — conjunctions, prepositions, articles, verbs
   "dan", "atau", "yang", "untuk", "pada", "dengan", "dari", "ke", "di",
   "ini", "itu", "adalah", "akan", "sebuah", "seorang", "mahasiswa",
   "tersebut", "sebagai", "jika", "maka", "sehingga", "karena", "agar",
   "supaya", "rata", "selisih", "proporsi", "signifikan", "berbeda",
-  "menggunakan", "menghitung", "menunjukkan", "bahwa", "data", "hasil",
+  "menggunakan", "menghitung", "menunjukkan", "bahwa", "hasil",
   "nilai", "tabel", "contoh", "soal", "kasus", "penyelesaian", "interpretasi",
   "output", "dihasilkan", "digunakan", "dapat", "tidak", "lebih", "besar",
   "kecil", "antara", "hingga", "serta", "namun", "tetapi", "sedangkan",
+  // Additional Indonesian academic terms
+  "dalam", "luar", "atas", "bawah", "setiap", "beberapa", "banyak",
+  "sedikit", "sama", "lain", "berikut", "misalnya", "seperti", "yaitu",
+  "ialah", "merupakan", "yaitu", " Yakni", "adapun", "sedangkan",
+  "selain", "kecuali", "serta", "maupun", "baik", "pula",
+  "dilakukan", "diperoleh", "didapat", "ditemukan", "terlihat",
+  "menunjukkan", "memperlihatkan", "menyatakan", "menjelaskan",
+  "diperlukan", "digunakan", "dibutuhkan", "diharapkan",
+  "modul", "praktikum", "latihan", "tugas", "jawaban", "pembahasan",
+  "rumus", "formula", "persamaan", "metode", "analisis", "uji",
+  "hipotesis", "nol", "alternatif", "tolak", "terima",
+  "derajat", "bebas", "kebebasan", "distribusi", "normal",
+  "rata", "ragam", "simpangan", "koefisien", "korelasi", "regresi",
+  "variabel", "dependen", "independen", "residu", "prediksi",
   // English
   "the", "and", "or", "for", "with", "from", "to", "in", "of", "a", "an",
   "is", "are", "was", "were", "this", "that", "these", "those", "be",
@@ -27,6 +41,13 @@ const PROSE_WORDS = new Set<string>([
   "would", "could", "should", "may", "might", "must", "can", "than",
   "then", "so", "such", "no", "not", "only", "own", "same", "other",
   "into", "through", "during", "before", "after", "above", "below",
+  "about", "above", "across", "after", "against", "along", "among",
+  "around", "at", "before", "behind", "below", "beneath", "beside",
+  "between", "beyond", "by", "down", "during", "except", "for", "from",
+  "in", "inside", "into", "like", "near", "of", "off", "on", "out",
+  "outside", "over", "past", "since", "through", "throughout", "to",
+  "toward", "under", "underneath", "until", "up", "upon", "with",
+  "within", "without",
 ]);
 
 // Phase 1 Fix #2 — threshold. A line is narrative if > 40% of its words are prose.
@@ -70,6 +91,13 @@ export const CODE_START_PATTERNS: RegExp[] = [
   /#\s*Kasus\s*:/i,
   /#\s*Soal\s+\d/i,
   /#\s*Contoh\s+\d/i,
+  /#\s*Latihan\s+\d/i, // additional: "Latihan N"
+  /#\s*Praktikum\s+\d/i, // additional: "Praktikum N"
+  /#\s*Tugas\s+\d/i, // additional: "Tugas N"
+  /Solusi\s*:/i, // additional: "Solusi:"
+  /Jawaban\s*:/i, // additional: "Jawaban:"
+  /Script\s*:/i, // additional: "Script:"
+  /Syntax\s*:/i, // additional: "Syntax:"
 ];
 
 export const CODE_END_PATTERNS: RegExp[] = [
@@ -81,7 +109,17 @@ export const CODE_END_PATTERNS: RegExp[] = [
   /Kode\s+penyelesaian\s*:?/i,
   /#\s*Kasus\s+\d/i,
   /#\s*Soal\s+\d/i,
+  /#\s*Contoh\s+\d/i,
+  /#\s*Latihan\s+\d/i,
+  /#\s*Praktikum\s+\d/i,
+  /#\s*Tugas\s+\d/i,
+  /Solusi\s*:/i,
+  /Jawaban\s*:/i,
   /^##\s/,
+  /Hasil\s+Output\s*:?/i,
+  /Penjelasan\s*:?/i,
+  /Analisis\s*:?/i,
+  /Kesimpulan\s*:?/i,
 ];
 
 export function isStartMarker(line: string): boolean {
@@ -97,19 +135,19 @@ export function isEndMarker(line: string): boolean {
 }
 
 // Phase 1 Fix #2 — strict prose check. A line is narrative if its prose word
-// ratio exceeds the threshold AND it doesn't carry strong R signals.
+// ratio exceeds the threshold AND it doesn't carry strong R/code signals.
 export function isNarrativeLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
   const ratio = proseRatio(t);
   if (ratio > PROSE_RATIO_THRESHOLD) {
-    // Only override back to code if the line has >= 2 R signals (strong code).
-    let strong = 0;
+    // Override back to code if the line has >= 1 strong R signal.
+    // Even a single signal like `summary(` or `library(` is enough to
+    // identify the line as code — don't let prose ratio override it.
     for (const p of R_SIGNALS) {
-      if (p.test(t)) strong++;
-      if (strong >= 2) break;
+      if (p.test(t)) return false;
     }
-    if (strong < 2) return true;
+    return true;
   }
   return false;
 }
@@ -130,7 +168,23 @@ export function isCodeLine(line: string): boolean {
   if (/\w+\s*<-\s/.test(t)) return true;
   if (/\w+\s*=\s*c\s*\(/.test(t)) return true;
   if (/\w+\s*=\s*\d/.test(t) && !/^\s*(if|while|for)\s/.test(t)) return true;
-  // function call, but ensure not ending with : or . (likely narrative)
+
+  // Python signals
+  if (/^\s*(import|from)\s+\w/.test(t)) return true;
+  if (/^\s*def\s+\w+\s*\(/.test(t)) return true;
+  if (/^\s*class\s+\w+/.test(t)) return true;
+  if (/^\s*if\s+__name__/.test(t)) return true;
+  if (/^\s*(print|return|raise|break|continue|pass)\s*\(/.test(t)) return true;
+  if (/^\s*elif\s+/.test(t)) return true;
+  if (/^\s*else\s*:/.test(t)) return true;
+
+  // SQL signals — case-insensitive
+  if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION)\b/i.test(t)) return true;
+
+  // General code patterns
+  // Semicolons at end (common in SQL, C, Java)
+  if (/;\s*$/.test(t) && !/[.!?]$/.test(t)) return true;
+  // Function call, but ensure not ending with : or . (likely narrative)
   if (/\b\w+\s*\([^)]*\)/.test(t) && !t.endsWith(":") && !t.endsWith(".")) {
     // Re-check prose ratio defensively.
     if (proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;

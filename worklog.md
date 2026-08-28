@@ -1185,3 +1185,83 @@ Stage Summary:
   3. Add "compare two snippets" feature (diff view)
   4. Add snippet folders/categories (beyond flat tags)
   5. Add block line-wrap toggle (show/hide long lines)
+
+---
+Task ID: 12
+Agent: main (user request: clone repo + improve output quality)
+Task: Clone CodeLooter repo, port the full _should_join line-wrap repair logic, add normalize_whitespace, improve prose detection, add Python/SQL signals.
+
+Work Log:
+- Cloned the CodeLooter repo from https://github.com/raynzz455/CodeLooter to /tmp/CodeLooter.
+- Read the original Python `backend/scripts/pdf_extract.py` — specifically the `repair_line_wraps` and `_should_join` functions which were significantly more sophisticated than the initial TypeScript port.
+- Read the original Python `backend/app/pattern_extract.py` to compare extraction logic.
+
+**Quality Improvement 1: Full `_should_join` port (repair.ts)**
+- Rewrote `repair.ts` to port the complete Python `_should_join` heuristic:
+  - Don't join if current ends with `;` (statement separator)
+  - Join if unclosed brackets (`opens > closes`)
+  - Don't join if next starts with `<-` or `->` (new assignment)
+  - Don't join if next is `var = value` pattern
+  - Don't join if current ends with `.!?:` (sentence enders)
+  - Don't join if current ends with `)`, `]`, `}` (closed brackets)
+  - Don't join if current ends with `[`, `"`, `'`, `` ` `` (open string/bracket)
+  - Don't join if next starts with code keywords (import, from, def, etc.)
+  - Don't join if next is "Capitalized word lowercase" (sentence pattern)
+  - DO join if current ends with `,+*/<>=&|([{` (operators/brackets)
+  - DO join if current ends with `-` and next starts with uppercase
+  - DO join if current ends with lowercase and next starts with `_`
+  - DO join if current ends with alphanumeric and next starts with `)`, `]`, `}`
+  - DO join if current ends with lowercase and next is short lowercase word
+
+**Quality Improvement 2: Whitespace normalization (normalizeWhitespace)**
+- Ported the Python `normalize_whitespace` function — removes PDF extraction artifacts:
+  - Standalone page numbers (lines that are just digits)
+  - Page artifacts like "halaman 42", "hal 12", "page 3"
+  - Collapses 2+ spaces/tabs to 1
+
+**Quality Improvement 3: Pre-extraction R-output stripping (stripROutputLines)**
+- New function that strips R console output lines (`## ...`, `[1] ...`) BEFORE extraction, so they don't pollute code blocks. Previously R-output was only stripped after block formation.
+
+**Quality Improvement 4: Expanded R signals (langdetect.ts)**
+- Added ~60 new R-specific function patterns: `wilcox.test`, `mann.whitney`, `kruskal.test`, `shapiro.test`, `read.delim`, `aes`, `geom_*`, `facet_*`, `theme_*`, `as.data.frame`, `as.numeric`, `as.character`, `write.csv`, `write.table`, `table`, `prop.table`, `factor`, `levels`, `nrow`, `ncol`, `dim`, `length`, `sort`, `order`, `unique`, `duplicated`, `subset`, `filter`, `mutate`, `select`, `group_by`, `summarise`, `arrange`, `paste`, `paste0`, `sprintf`, `nchar`, `tolower`, `toupper`, `substr`, `gsub`, `floor`, `ceiling`, `abs`, `round`, `pf`, `dnorm`, `dchisq`, `dt`, `head`, `tail`, `glimpse`, etc.
+
+**Quality Improvement 5: Expanded prose words (line-classify.ts)**
+- Added ~50 more Indonesian academic terms to the PROSE_WORDS set: "dalam", "luar", "atas", "bawah", "setiap", "beberapa", "banyak", "sedikit", "sama", "lain", "berikut", "misalnya", "seperti", "yaitu", "ialah", "merupakan", "selain", "kecuali", "maupun", "pula", "dilakukan", "diperoleh", "didapat", "ditemukan", "terlihat", "memperlihatkan", "menyatakan", "menjelaskan", "diperlukan", "dibutuhkan", "diharapkan", "modul", "praktikum", "latihan", "tugas", "jawaban", "pembahasan", "rumus", "formula", "persamaan", "metode", "analisis", "uji", "hipotesis", "nol", "alternatif", "tolak", "terima", "derajat", "bebas", "kebebasan", "distribusi", "normal", "ragam", "simpangan", "koefisien", "korelasi", "regresi", "variabel", "dependen", "independen", "residu", "prediksi".
+- Added English prepositions: "about", "across", "against", "along", "among", "around", "behind", "beneath", "beside", "between", "beyond", "inside", "like", "near", "outside", "past", "toward", "underneath", "until", "upon", "within", "without".
+- Removed `data` from PROSE_WORDS — it's too ambiguous (appears in code as `data.frame`, `read.csv("data.csv")`, `data$column`).
+
+**Quality Improvement 6: Python/SQL signal detection (line-classify.ts)**
+- Added Python signals to `is_code_line`: `import`, `from`, `def`, `class`, `if __name__`, `print()`, `return()`, `raise()`, `break`, `continue`, `pass`, `elif`, `else:`.
+- Added SQL signals: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `FROM`, `WHERE`, `JOIN`, `GROUP BY`, `ORDER BY`, `HAVING`, `UNION` (case-insensitive).
+- Added general code pattern: semicolons at end of line (common in SQL, C, Java).
+- Added more start markers: `# Latihan N`, `# Praktikum N`, `# Tugas N`, `Solusi:`, `Jawaban:`, `Script:`, `Syntax:`.
+- Added more end markers: `# Contoh N`, `# Latihan N`, `# Praktikum N`, `# Tugas N`, `Hasil Output:`, `Penjelasan:`, `Analisis:`, `Kesimpulan:`.
+
+**Quality Improvement 7: Narrative override threshold (line-classify.ts)**
+- Changed `isNarrativeLine` to override back to code if there's >= 1 R signal (was >= 2). A single signal like `summary(` or `library(` is enough to identify code.
+
+**Quality Improvement 8: Scan-fallback minimum (pattern-extract.ts)**
+- Lowered the scan-fallback minimum from 2 to 1 code line — captures single-line code that was missed by marker-anchored extraction (e.g., a lone `summary()` call after a page-number artifact was removed).
+
+- Created comprehensive quality test `src/lib/extractor/__test__/verify-quality.ts` with 50 checks covering:
+  - R statistics module (14 checks)
+  - Python notebook (7 checks)
+  - SQL scripts (5 checks)
+  - PDF artifacts / page numbers (8 checks)
+  - Line-wrap repair unit tests (4 checks)
+  - Narrative detection (7 checks)
+  - Whitespace normalization (5 checks)
+
+- Bumped extractor version to `phase1-v1.2.0`.
+
+- Verified:
+  - Lint: passes cleanly ✓
+  - Original extraction verify: 9/9 checks pass ✓
+  - Quality extraction verify: 50/50 checks pass (100%) ✓
+
+Stage Summary:
+- **Current project status**: Extraction quality significantly improved. The line-wrap repair now uses the full Python `_should_join` heuristic. Whitespace normalization removes PDF artifacts. R-output is stripped before extraction. Python/SQL code is now detected. Prose detection is more accurate with expanded vocabulary. All 50 quality checks pass at 100%.
+- **Key improvements**: 8 quality improvements totaling ~200 new lines of extraction logic. The extraction now handles R, Python, and SQL. Narrative false positives are reduced. PDF page-number artifacts are removed.
+- **Unresolved risks**:
+  - Dev server (both turbopack and webpack) has persistent cache corruption issues in the 4GB cgroup environment. Currently running in webpack mode. Mitigation: full cache clean + restart.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.

@@ -24,7 +24,7 @@ import {
   isStartMarker,
 } from "./line-classify";
 import { detectLanguage } from "./langdetect";
-import { repairLineWraps } from "./repair";
+import { repairLineWraps, normalizeWhitespace, stripROutputLines } from "./repair";
 import { mergeFragmentedBlocks, type CandidateBlock } from "./merge";
 
 export interface PatternExtractStats {
@@ -166,10 +166,17 @@ export function extractCodeBlocksFromText(
     return { blocks: [], stats };
   }
 
-  // ── Phase 1 Fix #3: repair line-wraps first ──
+  // ── Pre-processing pipeline (quality improvements) ──
+  // 1. Repair line-wraps (Phase 1 Fix #3) — re-join PDF-split lines.
+  // 2. Normalize whitespace — remove standalone page numbers & PDF artifacts.
+  // 3. Strip R-output lines (## ..., [1] ...) BEFORE extraction so they
+  //    don't pollute code blocks. The stripped count is tracked for stats.
   const originalLines = rawText.split(/\r?\n/);
-  const { lines, repairedCount } = repairLineWraps(originalLines);
+  const { lines: wrappedLines, repairedCount } = repairLineWraps(originalLines);
   stats.repairedWraps = repairedCount;
+  const normalizedLines = normalizeWhitespace(wrappedLines);
+  const { lines, stripped: preStripped } = stripROutputLines(normalizedLines);
+  stats.strippedROutput += preStripped;
 
   // Collect removed lines (narrative + R-output) for the before/after view.
   // We scan all lines after repair and classify each: code, R-output, or
@@ -269,9 +276,13 @@ export function extractCodeBlocksFromText(
       if (current.length === 0) currentStart = i;
       current.push(line.replace(/\s+$/, ""));
     } else {
-      if (current.length >= 2) {
+      // Lowered from >= 2 to >= 1 to capture single-line code that was missed
+      // by the marker-anchored extraction (e.g., a lone summary() call after
+      // a page-number artifact was removed). Single lines must still pass the
+      // isCodeLine check, which is strict enough to avoid false positives.
+      if (current.length >= 1) {
         const code = current.join("\n").trim();
-        if (code.length >= 10 && !splitBlocks.some((b) => b.code.includes(code))) {
+        if (code.length >= 5 && !splitBlocks.some((b) => b.code.includes(code))) {
           uncoded.push({
             code,
             lang: detectLanguage(code),
@@ -286,9 +297,9 @@ export function extractCodeBlocksFromText(
       current = [];
     }
   }
-  if (current.length >= 2) {
+  if (current.length >= 1) {
     const code = current.join("\n").trim();
-    if (code.length >= 10 && !splitBlocks.some((b) => b.code.includes(code))) {
+    if (code.length >= 5 && !splitBlocks.some((b) => b.code.includes(code))) {
       uncoded.push({
         code,
         lang: detectLanguage(code),
@@ -335,9 +346,13 @@ export function extractViaDensity(rawText: string): PatternExtractResult {
   };
   if (!rawText || !rawText.trim()) return { blocks: [], stats };
 
+  // Same pre-processing pipeline as the main extractor.
   const originalLines = rawText.split(/\r?\n/);
-  const { lines, repairedCount } = repairLineWraps(originalLines);
+  const { lines: wrappedLines, repairedCount } = repairLineWraps(originalLines);
   stats.repairedWraps = repairedCount;
+  const normalizedLines = normalizeWhitespace(wrappedLines);
+  const { lines, stripped: preStripped } = stripROutputLines(normalizedLines);
+  stats.strippedROutput += preStripped;
 
   const candidates: CandidateBlock[] = [];
   let current: string[] = [];

@@ -1,4 +1,9 @@
-// CodeLooter — Line-wrap repair (Phase 1 Fix #3)
+// CodeLooter — Line-wrap repair (Phase 1 Fix #3, enhanced)
+//
+// Ported from CodeLooter backend/scripts/pdf_extract.py `repair_line_wraps`
+// and `_should_join` — the original Python implementation is significantly
+// more sophisticated than the initial TypeScript port. This version brings
+// the two to parity for better output quality.
 //
 // PDF text extraction often splits a long code line across two physical
 // lines. Example:
@@ -6,60 +11,101 @@
 //   0000, 2200000)
 // We detect continuation patterns and re-join the fragments.
 
-// Does the line END in a way that signals continuation?
-//   - trailing comma
-//   - trailing binary operator (+ - * / < > = | & %)
-//   - unclosed brackets/parens (counted)
-//   - trailing assignment arrow "<-"
-function isContinuationEnd(line: string): boolean {
-  const t = line.trimEnd();
-  if (!t) return false;
-  const last = t[t.length - 1];
-  if (last === "," || last === "+" || last === "-" || last === "*" ||
-      last === "/" || last === "|" || last === "&" || last === "=" ||
-      last === "<" || last === ">") return true;
-  // trailing assignment / pipe
-  if (/<-\s*$/.test(t) || /%>%\s*$/.test(t)) return true;
+import { isROutput } from "./line-classify";
+
+// ─── Should-join heuristic (ported from Python _should_join) ───
+
+// Code keywords that, if the NEXT line starts with them, signal a NEW
+// statement — not a continuation of the current line.
+const CODE_KEYWORD_RE = /^\s*(import|from|def|class|function|func|fn|return|if|else|elif|for|while|switch|case|break|continue|public|private|protected|static|void|int|float|double|long|string|var|let|const|print|printf|println|cout|cin|echo|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|TABLE|DROP|library|require|module|export|async|await|package|interface|struct|enum|namespace|using|include|extends|implements|new|throw|try|catch|finally|#|\/\/|\/\*|--)\b/;
+
+// Does the current line end with a character that signals "statement ends
+// here" (so we should NOT join with the next line)?
+function endsComplete(t: string): boolean {
+  if (/[.!?]$/.test(t)) return true;   // sentence ender
+  if (/[;]$/.test(t)) return true;     // statement separator
+  if (/[)\]}]$/.test(t)) return true;  // closed bracket → statement likely done
+  if (/[\["'`]$/.test(t)) return true; // open string/bracket → but handled elsewhere
   return false;
 }
 
-// Count unclosed openers on the line.
-function unclosedBrackets(line: string): number {
-  let depth = 0;
-  for (const ch of line) {
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth--;
-  }
-  return depth;
+// Does the next line look like a "Capitalized Word lowercase" sentence
+// start? (e.g. "The data shows" → don't join)
+function isSentenceStart(t: string): boolean {
+  return /^[A-Z][a-z]+\s+[a-z]/.test(t) && !/^\w+\s*\(/.test(t);
 }
 
-// Does the line START in a way that signals continuation of the previous?
-//   - starts with a number that has no preceding identifier (likely split number)
-//   - starts with closing bracket
-//   - starts with identifier/continuation
-function isContinuationStart(line: string): boolean {
-  const t = line.trimStart();
-  if (!t) return false;
-  // starts with closing bracket
-  if (/^[)\]}]/.test(t)) return true;
-  // starts with digits (continuation of a numeric vector like "..., 170\n0000, ...")
-  if (/^\d/.test(t) && !/^\w+\s*<-/.test(t) && !/^\w+\s*=/.test(t)) return true;
-  // starts with string literal continuation
-  if (/^[,'""]/.test(t)) return true;
-  // starts with identifier that looks like a vector element (no assignment)
-  if (/^\w[\w.]*\s*[,)]/.test(t)) return true;
+// Does the current line end with an operator/bracket that signals "more to
+// come" — a positive join signal?
+function endsWithJoinSignal(t: string): boolean {
+  if (/[,+*/<>=&|({\[]$/.test(t)) return true;
+  if (/-$/.test(t) && true) return true; // trailing dash
+  return false;
+}
+
+// Core: should we join `cur` and `nxt` into one logical line?
+// Returns true if they should be joined.
+function shouldJoin(cur: string, nxt: string): boolean {
+  const curT = cur.replace(/\s+$/, ""); // rstrip
+  const nxtT = nxt.replace(/^\s+/, "");  // lstrip
+
+  if (!curT || !nxtT) return false;
+
+  // Don't join if current ends with `;` (statement separator)
+  if (/;$/.test(curT)) return false;
+
+  // Join if there are unclosed brackets on the current line
+  const opens = (curT.match(/[([{]/g) || []).length;
+  const closes = (curT.match(/[)\]}]/g) || []).length;
+  if (opens > closes) return true;
+
+  // Don't join if next starts with assignment arrow (new statement)
+  if (/<-|->/.test(nxtT.slice(0, 30))) return false;
+
+  // Don't join if next is `var = value` pattern (new assignment)
+  if (/^[^=<>!]{1,20}=[^=]/.test(nxtT)) return false;
+
+  // Don't join if current ends with sentence punctuation
+  if (/[.!?]$/.test(curT)) return false;
+  // Don't join if current ends with colon (but allow "::" R namespace)
+  if (/:$/.test(curT) && !/::$/.test(curT)) return false;
+
+  // Don't join if current ends with closing bracket
+  if (/[)\]}]$/.test(curT)) return false;
+
+  // Don't join if current ends with open bracket/string start (but allow
+  // unclosed-bracket case above which returns true earlier)
+  if (/[\["'`]$/.test(curT)) return false;
+
+  // Don't join if next starts with a code keyword
+  if (CODE_KEYWORD_RE.test(nxtT)) return false;
+
+  // Don't join if next looks like a sentence start
+  if (isSentenceStart(nxtT)) return false;
+
+  // Positive join signals — current ends with operator/comma
+  if (endsWithJoinSignal(curT)) return true;
+
+  // Trailing dash + next starts uppercase
+  if (/-$/.test(curT) && /^[A-Z]/.test(nxtT)) return true;
+
+  // Lowercase + underscore start
+  if (/[a-z]$/.test(curT) && /^_/.test(nxtT)) return true;
+
+  // Alphanumeric end + closing bracket start (e.g. `foo\n)` → join)
+  if (/[a-zA-Z0-9_]$/.test(curT) && /^[)\]}]/.test(nxtT)) return true;
+
+  // Lowercase end + short lowercase continuation (e.g. `data\nframe`)
+  if (/[a-z]$/.test(curT) && /^[a-z]{1,8}$/.test(nxtT)) {
+    if (!/<-=$/.test(curT) && !/^.{0,40}=[^=]/.test(nxtT)) return true;
+  }
+
   return false;
 }
 
 // Is this line a comment? (We must not merge comments into the previous line.)
 function isComment(line: string): boolean {
   return /^\s*#/.test(line) && !/^#\s*(Kasus|Soal|Contoh)\s+\d/i.test(line);
-}
-
-// Is this line R console output?
-function isROutput(line: string): boolean {
-  const t = line.trimStart();
-  return t.startsWith("## ") || t.startsWith("##\t") || /^\[\d+\]\s/.test(t);
 }
 
 export interface WrapRepairStats {
@@ -70,105 +116,84 @@ export interface WrapRepairStats {
 // Repair line-wraps in-place. Returns the new line array and the count of
 // merges performed.
 //
-// Strategy: walk through lines. Maintain an "accumulator" — the current
-// logical line we are building. Decide whether to append the next physical
-// line to the accumulator based on:
-//   - the accumulator ends with a continuation signal (comma, operator,
-//     unclosed bracket), OR
-//   - the next line is a continuation start (digit, closing bracket, vector
-//     element) AND is not itself a comment / R output / blank.
+// Strategy (ported from Python repair_line_wraps):
+//   Walk through lines. For each line, keep joining with the next line
+//   while shouldJoin returns true. This handles multi-line continuations.
 export function repairLineWraps(lines: string[]): WrapRepairStats {
   if (lines.length === 0) return { repairedCount: 0, lines };
 
   const out: string[] = [];
   let repaired = 0;
-  let acc: string | null = null;
+  let i = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const line = raw.replace(/\s+$/, ""); // trim trailing whitespace
+  while (i < lines.length) {
+    let line = lines[i];
 
-    if (line.trim() === "") {
-      // blank line — flush accumulator
-      if (acc !== null) { out.push(acc); acc = null; }
-      out.push("");
-      continue;
-    }
-    // comments and R output flush the accumulator and stand alone
-    if (isComment(line) || isROutput(line)) {
-      if (acc !== null) { out.push(acc); acc = null; }
-      out.push(line);
-      continue;
-    }
-
-    if (acc === null) {
-      acc = line;
-      // If this line itself signals continuation (unclosed brackets / trailing
-      // comma), keep accumulating; otherwise flush.
-      if (!shouldContinue(acc, line, null)) {
-        out.push(acc);
-        acc = null;
-      }
-      continue;
-    }
-
-    // We have an accumulator. Decide whether to extend it.
-    const next = line;
-    const endsWithContinue = isContinuationEnd(acc);
-    const unclosed = unclosedBrackets(acc) > 0;
-    const startsContinue = isContinuationStart(next);
-
-    if (unclosed || endsWithContinue || startsContinue) {
-      // Determine separator: if the previous accumulator ends with an
-      // operator/comma, join with a single space (avoid gluing tokens).
-      // If the next line starts with a digit that's a continuation of a
-      // number (like "170" + "0000"), join WITHOUT a space to reconstruct
-      // the number.
-      let sep = " ";
-      const prevLast = acc[acc.length - 1];
-      const nextFirst = next.trimStart()[0];
-      // Number continuation: prev ends with digit, next starts with digit,
-      // and prev's last token is a number that was cut (odd length heuristic).
-      if (/\d$/.test(acc) && /^\d/.test(next.trimStart())) {
-        // Heuristic: if the previous number "looks cut" (e.g. ends in 0/5 and
-        // next continues with 000), glue without space. We check that the
-        // accumulator ends with a partial numeric literal by scanning back.
-        const tail = acc.match(/(\d[\d.]*)$/);
-        if (tail) {
-          // If the tail length is not a "round" typical number and next is
-          // all-digits-with-comma, glue.
-          if (/^\d+[,)\]\s]/.test(next.trimStart())) {
-            sep = ""; // glue digits
-          }
-        }
-      }
-      // If prev ends with "(" and next starts with identifier, no space needed,
-      // but a space is harmless — keep space for safety.
-      if (prevLast === "(" && /[a-zA-Z0-9_]/.test(nextFirst)) sep = "";
-      acc = acc + sep + next.trim();
+    // Keep joining while the next line should be joined.
+    while (i + 1 < lines.length && shouldJoin(line, lines[i + 1])) {
+      i++;
+      line = line + lines[i].replace(/^\s+/, "");
       repaired++;
-      // After extending, check if the accumulator still signals continuation.
-      if (!shouldContinue(acc, acc, null)) {
-        out.push(acc);
-        acc = null;
-      }
-      continue;
     }
 
-    // Not a continuation — flush accumulator, start new one.
-    out.push(acc);
-    acc = line;
-    if (!shouldContinue(acc, line, null)) {
-      out.push(acc);
-      acc = null;
-    }
+    out.push(line);
+    i++;
   }
-  if (acc !== null) out.push(acc);
 
   return { repairedCount: repaired, lines: out };
 }
 
-// Should we keep accumulating after `acc`?
-function shouldContinue(acc: string, _line: string, _next: string | null): boolean {
-  return isContinuationEnd(acc) || unclosedBrackets(acc) > 0;
+// ─── Whitespace normalization (ported from Python normalize_whitespace) ───
+//
+// Removes PDF extraction artifacts:
+//   - Standalone page numbers (lines that are just digits)
+//   - Short fragments like "halaman 42" that PDF extraction scatters
+//   - Collapses 2+ spaces to 1
+
+export function normalizeWhitespace(lines: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    // Strip \r, collapse 2+ spaces/tabs to 1, rstrip
+    line = line.replace(/\r/g, "");
+    line = line.replace(/[ \t]{2,}/g, " ").replace(/\s+$/, "");
+
+    const t = line.trim();
+
+    // Remove standalone page numbers (lines that are just digits)
+    if (t && /^\d+$/.test(t)) continue;
+
+    // Remove short "word + number" patterns that are PDF page artifacts
+    // e.g. "halaman 42", "hal 12", "hal. 5", "page 3"
+    const isPageArtifact =
+      /^(halaman|hal|hal\.|page|pg|p\.|p)\s*\.?\s*\d+/i.test(t) ||
+      /^[a-z]{1,4}\s+\d+(\.\d+)?\s*$/i.test(t);
+    const isCodeKeyword = /^(int|for|var|let|def|if|in|of|as|to|while|do|elif|else|try|except|finally|return|raise|throw|import|from|class|function|func|fn|library|require|module|export|async|await|package|interface|struct|enum|namespace|using|include|extends|implements|new|switch|case|break|continue|public|private|protected|static|void|float|double|long|string|const|print|printf|println|cout|cin|echo|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|TABLE|DROP)\b/.test(t);
+
+    if (isPageArtifact && !isCodeKeyword) {
+      continue;
+    }
+
+    out.push(line);
+  }
+  return out;
+}
+
+// ─── R-output stripping (pre-processing) ───
+//
+// Strips R console output lines (## ..., [1] ...) BEFORE extraction so they
+// don't pollute the code blocks. This is a quality improvement over the
+// previous approach which only stripped them after block formation.
+
+export function stripROutputLines(lines: string[]): { lines: string[]; stripped: number } {
+  const out: string[] = [];
+  let stripped = 0;
+  for (const line of lines) {
+    if (isROutput(line)) {
+      stripped++;
+      continue;
+    }
+    out.push(line);
+  }
+  return { lines: out, stripped };
 }
