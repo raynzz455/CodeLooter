@@ -87,6 +87,11 @@ export default function Home() {
   // panel shows an extra "Update" button so the user can push edits back to
   // the same snippet record via PATCH /api/snippets/[id].
   const [currentSnippetId, setCurrentSnippetId] = useState<string | undefined>(undefined);
+  // Comma-separated tags of the snippet currently loaded into the panel.
+  // Mirrors `currentSnippetId` — set when a saved snippet is loaded, cleared
+  // for fresh extractions / batch results / history entries. Forwarded to
+  // the ResultPanel as `currentTags` so the tag input is pre-populated.
+  const [currentTags, setCurrentTags] = useState<string | undefined>(undefined);
 
   const addHistoryEntry = useHistory((s) => s.addEntry);
 
@@ -97,6 +102,8 @@ export default function Home() {
     // Fresh extraction has no associated snippet record — clear any stale id
     // so the ResultPanel no longer offers "Update" until the user saves.
     setCurrentSnippetId(undefined);
+    // Fresh extraction also has no tags yet — clear the tag input.
+    setCurrentTags(undefined);
     try {
       const r = await extractFile(file, lang);
       setResult(r);
@@ -118,6 +125,7 @@ export default function Home() {
     setResult(null);
     setBatchResults(null);
     setCurrentSnippetId(undefined);
+    setCurrentTags(undefined);
     try {
       const results = await extractBatch(files, lang);
       setBatchResults(results);
@@ -155,6 +163,7 @@ export default function Home() {
     setResult(null);
     setBatchResults(null);
     setCurrentSnippetId(undefined);
+    setCurrentTags(undefined);
     toast.info("Hasil dibersihkan");
   }, []);
 
@@ -164,6 +173,7 @@ export default function Home() {
     // History entries are session-scoped extraction results and carry no
     // snippet id, so the inline "Update" button is intentionally hidden here.
     setCurrentSnippetId(undefined);
+    setCurrentTags(undefined);
   }, []);
 
   const handleSelectSnippet = useCallback((detail: SnippetDetail) => {
@@ -186,6 +196,9 @@ export default function Home() {
     // The loaded snippet has a known record id, so the ResultPanel can offer
     // "Update" to push edits back to this exact record.
     setCurrentSnippetId(detail.id);
+    // Pre-populate the tag input with the snippet's existing tags so the
+    // user can see / edit them before the next "Update".
+    setCurrentTags(detail.tags);
     toast.success(`Snippet "${detail.filename}" dimuat`);
   }, []);
 
@@ -193,15 +206,18 @@ export default function Home() {
   // snippet record identified by `id`. Uses the PATCH endpoint so the record
   // is updated in-place (no duplicate created). On success we refresh the
   // SnippetList so the new block count / updatedAt is visible.
+  //
+  // The optional `tags` parameter forwards the panel's tag input so the
+  // PATCH can also update the snippet's tags in the same round-trip.
   const handleUpdateSnippet = useCallback(
-    async (id: string, editedBlocks: CodeBlock[]) => {
+    async (id: string, editedBlocks: CodeBlock[], tags?: string) => {
       // Use the blocks passed from the ResultPanel (which reflect in-panel
       // edits: merge, split, delete, duplicate, reorder, text edits) rather
       // than the stale `result.blocks` from the parent's state.
       const blocks = editedBlocks;
       const lang = blocks[0]?.lang ?? "unknown";
       try {
-        const updated = await updateSnippet(id, blocks, lang);
+        const updated = await updateSnippet(id, blocks, lang, tags);
         // Adopt the (possibly re-indexed) blocks returned by the server so the
         // panel reflects the persisted state.
         setResult((prev) =>
@@ -220,6 +236,11 @@ export default function Home() {
             : prev,
         );
         setCurrentSnippetId(updated.id);
+        // Mirror the persisted tags back into `currentTags` so the panel's
+        // tag input stays in sync with what's now stored server-side (the
+        // server trims/normalizes nothing, but this keeps the source of
+        // truth consistent if a future change does).
+        setCurrentTags(updated.tags);
         setRefreshKey((k) => k + 1);
         toast.success(`Snippet diperbarui · ${updated.id.slice(0, 8)}`);
       } catch (e: any) {
@@ -402,6 +423,8 @@ export default function Home() {
                   // A batch result row is not a saved snippet — clear the
                   // current id so "Update" is hidden until the user saves.
                   setCurrentSnippetId(undefined);
+                  // Batch results carry no tags either — clear the tag input.
+                  setCurrentTags(undefined);
                 }}
               />
             ) : (
@@ -409,12 +432,15 @@ export default function Home() {
                 result={result}
                 loading={loading}
                 currentSnippetId={currentSnippetId}
+                currentTags={currentTags}
                 onUpdateSnippet={handleUpdateSnippet}
-                onSaved={(snippetId) => {
+                onSaved={(snippetId, tags) => {
                   // New snippet created → adopt it as the current id so the
                   // next round of edits can use "Update" instead of saving
-                  // another duplicate.
+                  // another duplicate. Also adopt the tags that were just
+                  // persisted so the panel's tag input stays in sync.
                   if (snippetId) setCurrentSnippetId(snippetId);
+                  if (tags !== undefined) setCurrentTags(tags);
                   setRefreshKey((k) => k + 1);
                 }}
               />

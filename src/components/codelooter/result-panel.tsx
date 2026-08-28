@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare, ClipboardCopy, GripVertical, ArrowUpDown, FileCode2, RefreshCw, CheckSquare, Square, Trash2, X, Search, Braces, Tag } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
 import { saveSnippet } from "@/lib/codelooter-api";
@@ -19,11 +20,12 @@ interface ResultPanelProps {
   loading: boolean;
   /**
    * Called after a snippet is saved as a NEW record (existing behaviour).
-   * Receives the freshly-created snippet id so the parent can adopt it as
-   * the new `currentSnippetId` (allowing subsequent edits to update the
-   * same record in-place).
+   * Receives the freshly-created snippet id (and the tags that were sent
+   * with the save) so the parent can adopt them as the new
+   * `currentSnippetId` / `currentTags` (allowing subsequent edits to
+   * update the same record in-place).
    */
-  onSaved: (snippetId?: string) => void;
+  onSaved: (snippetId?: string, tags?: string) => void;
   /**
    * ID of the snippet currently loaded into the panel. When set, an extra
    * "Update" button is rendered next to "Simpan" so the user can push
@@ -37,11 +39,21 @@ interface ResultPanelProps {
    * Receives the panel's current (possibly edited) blocks so the PATCH
    * payload reflects in-panel edits (merge, split, delete, duplicate,
    * reorder, text edits) — not the stale `result.blocks` from the parent.
+   * The optional `tags` parameter forwards the panel's current tag input
+   * so the PATCH can also update the snippet's tags in the same round-trip.
    */
-  onUpdateSnippet?: (id: string, blocks: CodeBlock[]) => Promise<void> | void;
+  onUpdateSnippet?: (id: string, blocks: CodeBlock[], tags?: string) => Promise<void> | void;
+  /**
+   * Comma-separated tags of the snippet currently loaded into the panel
+   * (mirrors `currentSnippetId`). When a saved snippet is selected from
+   * the list, the parent forwards its `tags` here so the tag input can be
+   * pre-populated. `undefined` for a fresh extraction (no associated
+   * snippet) → the input is cleared.
+   */
+  currentTags?: string;
 }
 
-export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpdateSnippet }: ResultPanelProps) {
+export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpdateSnippet, currentTags }: ResultPanelProps) {
   const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -49,8 +61,20 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
   const [copiedMd, setCopiedMd] = useState(false);
   const [zipping, setZipping] = useState(false);
   const [exportingHtml, setExportingHtml] = useState(false);
+  const [exportingJson, setExportingJson] = useState(false);
   const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
   const [reorderMode, setReorderMode] = useState(false);
+  // Tag input value (comma-separated). Synced from `currentTags` whenever
+  // the parent loads a new snippet (or clears the panel); the user can then
+  // freely edit the value, which is forwarded to saveSnippet / updateSnippet.
+  const [tagInput, setTagInput] = useState("");
+
+  // In-block search & language filter state. The search input lives below
+  // the file header card and narrows the visible blocks list (the header
+  // stats still reflect ALL blocks). Both are reset whenever a new result
+  // arrives so a stale query from a previous file doesn't bleed over.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [langFilter, setLangFilter] = useState("all");
 
   // Multi-select state for bulk operations (copy / delete / ZIP). The set
   // holds block `index` values — the same key used by every per-block
@@ -87,14 +111,54 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     setBlocks(null);
     setViewMode("extracted");
     setReorderMode(false);
+    // Reset the in-block search & language filter so a query from the
+    // previous file doesn't bleed into the newly-loaded result.
+    setSearchQuery("");
+    setLangFilter("all");
     // Clear any active multi-select so stale selections don't bleed into
     // the newly-loaded result.
     setSelectedIndices(new Set());
     setConfirmBulkDelete(false);
+    // A fresh extraction has no associated snippet → clear the tag input so
+    // tags from a previously-loaded snippet don't bleed into the new save.
+    // The dedicated `currentTags` sync effect below will overwrite this
+    // immediately when a saved snippet is loaded instead.
+    setTagInput("");
   }, [result]);
+
+  // Sync the tag input from the parent's `currentTags` prop. This fires
+  // whenever the user selects a saved snippet (parent forwards its tags) or
+  // when the parent clears the panel (currentTags becomes undefined). The
+  // effect is intentionally keyed on `currentTags` only — not `result` — so
+  // an in-progress tag edit isn't wiped when a fresh extraction of a
+  // different file replaces `result` (the reset-on-result effect above
+  // already handles the clear-on-new-extraction case).
+  useEffect(() => {
+    setTagInput(currentTags ?? "");
+  }, [currentTags]);
 
   // Sync local editable blocks whenever a new result arrives.
   const effectiveBlocks = blocks ?? result?.blocks ?? [];
+
+  // ── In-block search & language filter ─────────────────────────────────
+  // Text match is a case-insensitive substring search over `b.code`. The
+  // language match is exact-equality against the dropdown value (or "all"
+  // to disable the language filter). Both conditions are AND-combined so a
+  // user searching "ggplot2" with the language set to "r" sees only R
+  // blocks whose code contains "ggplot2".
+  //
+  // NOTE: the file header card (total count, language distribution, line
+  // totals, copy/zip/save buttons) still uses `effectiveBlocks` — those
+  // reflect the FULL extraction, not the filtered subset. Only the visible
+  // blocks list renders `filteredBlocks`.
+  const uniqueLangs = Array.from(new Set(effectiveBlocks.map((b) => b.lang)));
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredBlocks = effectiveBlocks.filter((b) => {
+    const matchesText = trimmedQuery === "" || b.code.toLowerCase().includes(trimmedQuery);
+    const matchesLang = langFilter === "all" || b.lang === langFilter;
+    return matchesText && matchesLang;
+  });
+  const isFiltering = trimmedQuery !== "" || langFilter !== "all";
 
   const handleSave = async () => {
     if (!result) return;
@@ -105,11 +169,18 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
         effectiveBlocks,
         effectiveBlocks[0]?.lang ?? "unknown",
         result.size,
+        // Forward the tag input so the new snippet is created with the
+        // user's tags (comma-separated). Empty string is a no-op on the
+        // server (default is "").
+        tagInput.trim(),
       );
       toast.success(`Snippet disimpan · ${saved.id.slice(0, 8)}`);
       // Adopt the freshly-created snippet as the current one so subsequent
       // edits can be pushed back via "Update" rather than re-saving a copy.
-      onSaved(saved.id);
+      // Also forward the tags that were sent so the parent's `currentTags`
+      // state matches what was persisted (otherwise the [currentTags] sync
+      // effect could later overwrite an in-progress tag edit).
+      onSaved(saved.id, tagInput.trim());
     } catch (e: any) {
       toast.error(e?.message ?? "Gagal menyimpan");
     } finally {
@@ -128,7 +199,10 @@ export function ResultPanel({ result, loading, onSaved, currentSnippetId, onUpda
     try {
       // Pass the panel's effective (possibly edited) blocks so the parent's
       // PATCH payload reflects in-panel edits — not stale result.blocks.
-      await onUpdateSnippet(currentSnippetId, effectiveBlocks);
+      // Also forward the current tagInput so the snippet's tags can be
+      // updated alongside the code (the parent's PATCH handler accepts an
+      // optional `tags` parameter).
+      await onUpdateSnippet(currentSnippetId, effectiveBlocks, tagInput.trim());
     } finally {
       setUpdating(false);
     }
@@ -368,6 +442,49 @@ ${sections}
       toast.error(e?.message ?? "Gagal membuat HTML");
     } finally {
       setExportingHtml(false);
+    }
+  };
+
+  // Build a structured JSON export containing the filename, file size, total
+  // block count, an ISO timestamp of the export moment, the extraction
+  // stats (when available) and the full per-block payload (index, language,
+  // raw code, line count and the source/origin tag). The file is downloaded
+  // client-side as a Blob (no round-trip to the server) and named
+  // `${base}_export.json` so it doesn't collide with the txt/zip/html exports.
+  // Loading state is kept symmetrical with the other export buttons even
+  // though JSON serialization is effectively instant.
+  const handleDownloadJson = () => {
+    if (!result || effectiveBlocks.length === 0) return;
+    setExportingJson(true);
+    try {
+      const payload = {
+        filename: result.filename,
+        fileSize: result.size,
+        totalBlocks: effectiveBlocks.length,
+        extractedAt: new Date().toISOString(),
+        stats: result.stats ?? null,
+        blocks: effectiveBlocks.map((b) => ({
+          index: b.index,
+          lang: b.lang,
+          code: b.code,
+          lines: b.lines,
+          source: b.source,
+        })),
+      };
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+      a.download = `${base}_export.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`JSON dengan ${effectiveBlocks.length} blok dibuat`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal membuat JSON");
+    } finally {
+      setExportingJson(false);
     }
   };
 
@@ -715,6 +832,16 @@ ${sections}
               {exportingHtml ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCode2 className="h-4 w-4" />}
               <span className="hidden sm:inline">{exportingHtml ? "Membuat…" : "HTML"}</span>
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDownloadJson}
+              disabled={effectiveBlocks.length === 0 || exportingJson}
+              title="Download semua blok + metadata sebagai file JSON terstruktur"
+            >
+              {exportingJson ? <Loader2 className="h-4 w-4 animate-spin" /> : <Braces className="h-4 w-4" />}
+              <span className="hidden sm:inline">{exportingJson ? "Membuat…" : "JSON"}</span>
+            </Button>
             {/* Comparison view toggle — only show if removedLines exist */}
             {result.stats?.removedLines && result.stats.removedLines.length > 0 && (
               <Button
@@ -764,6 +891,22 @@ ${sections}
             )}
           </div>
         </div>
+        {/* Tag input — comma-separated tags attached to the snippet on
+            save / update. Sits below the filename row (and above the
+            language distribution badges) so it's always visible without
+            scrolling. The Tag icon uses the emerald palette to match the
+            rest of the header accents. */}
+        <div className="flex items-center gap-2 border-t border-border/40 pt-2">
+          <Tag className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <Input
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            placeholder="Tag (pisah dengan koma)..."
+            aria-label="Tag snippet (pisah dengan koma)"
+            className="h-8 text-xs"
+          />
+        </div>
         {/* Language distribution badges */}
         {effectiveBlocks.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2">
@@ -781,6 +924,64 @@ ${sections}
         {result.stats && <StatsBar stats={result.stats} />}
         {result.stats && <StatsChart stats={result.stats} />}
       </motion.div>
+
+      {/* In-block search & language filter — sits between the file header
+          card (which still reflects ALL blocks) and the blocks list. Only
+          shown in the normal extracted view (not comparison, not reorder,
+          not when there are zero blocks). The visible blocks list below
+          renders `filteredBlocks` instead of `effectiveBlocks`, but every
+          header stat / copy / zip / save action still operates on the full
+          `effectiveBlocks` set. */}
+      {viewMode === "extracted" && !reorderMode && effectiveBlocks.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2"
+        >
+          <div className="relative min-w-[180px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari dalam blok kode..."
+              aria-label="Cari dalam blok kode"
+              className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-8 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Bersihkan pencarian"
+                title="Bersihkan pencarian"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <select
+            value={langFilter}
+            onChange={(e) => setLangFilter(e.target.value)}
+            aria-label="Filter berdasarkan bahasa"
+            title="Filter berdasarkan bahasa"
+            className="h-8 shrink-0 rounded-md border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
+          >
+            <option value="all">Semua bahasa</option>
+            {uniqueLangs.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
+          </select>
+          {isFiltering && (
+            <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
+              {filteredBlocks.length} dari {effectiveBlocks.length} blok
+            </span>
+          )}
+        </motion.div>
+      )}
 
       {/* Bulk action bar — only shown when at least one block is selected
           and we're not in comparison / reorder mode (those modes have their
@@ -878,16 +1079,47 @@ ${sections}
           onDuplicate={handleDuplicate}
           onChangeLang={handleBlockLangChange}
         />
+      ) : filteredBlocks.length === 0 ? (
+        // Empty state: the extraction produced blocks but the current
+        // search / language filter narrows the list to zero. Offer a
+        // one-click reset so the user doesn't have to find the search
+        // bar manually.
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Search className="h-6 w-6" />
+          </div>
+          <p className="text-sm font-medium">Tidak ada blok cocok dengan pencarian</p>
+          <p className="max-w-xs text-xs text-muted-foreground">
+            Coba ubah kata kunci atau filter bahasa, lalu cari lagi.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+            onClick={() => {
+              setSearchQuery("");
+              setLangFilter("all");
+            }}
+          >
+            <X className="h-4 w-4" />
+            <span>Bersihkan pencarian</span>
+          </Button>
+        </motion.div>
       ) : (
         <AnimatePresence mode="popLayout">
-          {effectiveBlocks.map((b, i) => (
+          {filteredBlocks.map((b, i) => (
             <motion.div
               key={`${result.filename}-${b.index}`}
               layout
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2, delay: b.index * 0.04 }}
+              transition={{ duration: 0.2, delay: i * 0.04 }}
             >
               <CodeBlockCard
                 block={b}
@@ -900,7 +1132,11 @@ ${sections}
                 onChangeLang={handleBlockLangChange}
                 selected={selectedIndices.has(b.index)}
                 onToggleSelect={toggleSelect}
-                isLast={i === effectiveBlocks.length - 1}
+                // Hide the "merge with next" button only when this block
+                // is the truly last block in `effectiveBlocks` (not the
+                // last visible block) — that way filtering never hides a
+                // merge action that still has a valid target.
+                isLast={b.index === effectiveBlocks[effectiveBlocks.length - 1]?.index}
               />
             </motion.div>
           ))}

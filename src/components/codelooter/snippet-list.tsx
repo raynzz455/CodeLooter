@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { History, Trash2, FileCode, Loader2, Clock, Search, X, Download, FileArchive } from "lucide-react";
+import { History, Trash2, FileCode, Loader2, Clock, Search, X, Download, FileArchive, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -27,6 +27,17 @@ function timeAgo(iso: string): string {
   if (h < 24) return `${h} jam lalu`;
   const d = Math.floor(h / 24);
   return `${d} hr lalu`;
+}
+
+// Split a comma-separated tag string into a clean list of non-empty trimmed
+// tags. Returns `[]` when the input is empty/whitespace-only so callers can
+// simply `tags.length > 0 &&` to gate the badge row rendering.
+function parseTags(tags: string | undefined | null): string[] {
+  if (!tags) return [];
+  return tags
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
 }
 
 interface SnippetListProps {
@@ -55,14 +66,15 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
     load();
   }, [refreshKey]);
 
-  // Client-side search filter — searches filename and language.
+  // Client-side search filter — searches filename, language and tags.
   const filtered = useMemo(() => {
     if (!query.trim()) return snippets;
     const q = query.toLowerCase();
     return snippets.filter(
       (s) =>
         s.originalFilename.toLowerCase().includes(q) ||
-        s.extractedLang.toLowerCase().includes(q),
+        s.extractedLang.toLowerCase().includes(q) ||
+        (s.tags ?? "").toLowerCase().includes(q),
     );
   }, [snippets, query]);
 
@@ -144,7 +156,12 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
         </div>
       ) : (
         <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto pr-1">
-          {filtered.map((s) => (
+          {filtered.map((s) => {
+            // Parse comma-separated tags once per row. Empty / whitespace-only
+            // → empty array → the tag row is omitted entirely so untagged
+            // snippets keep their compact single-line layout.
+            const tagList = parseTags(s.tags);
+            return (
             <div
               key={s.id}
               role="button"
@@ -171,6 +188,19 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
                     {timeAgo(s.createdAt)}
                   </span>
                 </div>
+                {tagList.length > 0 && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <Tag className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                    {tagList.map((t, i) => (
+                      <span
+                        key={`${s.id}-tag-${i}-${t}`}
+                        className="inline-flex items-center rounded-full bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <a
                 href={downloadSnippetUrl(s.id)}
@@ -198,7 +228,8 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
                 {busyId === s.id ? null : <Trash2 className="h-3.5 w-3.5" />}
               </Button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

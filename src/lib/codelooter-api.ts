@@ -35,6 +35,10 @@ export interface SnippetMeta {
   totalBlocks: number;
   fileSize: number;
   extractedLang: string;
+  // Comma-separated tags (e.g. "statistika, modul3") — empty string when
+  // the snippet has no tags. Split on "," and trim each entry to recover
+  // the individual tag list for display.
+  tags?: string;
   createdAt: string;
 }
 
@@ -92,11 +96,12 @@ export async function saveSnippet(
   blocks: CodeBlock[],
   lang: string,
   size: number,
+  tags?: string,
 ): Promise<{ id: string }> {
   const res = await fetch("/api/snippets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, blocks, lang, size }),
+    body: JSON.stringify({ filename, blocks, lang, size, tags }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -113,15 +118,21 @@ export async function getSnippet(id: string): Promise<SnippetDetail> {
 // previously-saved snippet in the ResultPanel and clicks "Update" to
 // persist the changes back to the same snippet record (rather than saving
 // a brand-new snippet). Returns the updated snippet detail.
+//
+// `tags` is optional: when provided, the snippet's tag string is replaced;
+// when omitted, the existing tags are left untouched on the server.
 export async function updateSnippet(
   id: string,
   blocks: CodeBlock[],
   lang: string,
+  tags?: string,
 ): Promise<SnippetDetail> {
+  const payload: Record<string, unknown> = { blocks, lang };
+  if (tags !== undefined) payload.tags = tags;
   const res = await fetch(`/api/snippets/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blocks, lang }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();

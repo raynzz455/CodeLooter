@@ -20,6 +20,7 @@ export async function GET() {
       totalBlocks: true,
       fileSize: true,
       extractedLang: true,
+      tags: true,
       createdAt: true,
     },
   });
@@ -38,6 +39,9 @@ export async function POST(req: NextRequest) {
   const filename = String(body.filename || "snippet.txt");
   const lang = String(body.lang || "auto");
   const size = Number(body.size || 0);
+  // Tags are an optional comma-separated string (e.g. "statistika, modul3").
+  // Empty/undefined → stored as empty string so existing records stay valid.
+  const tags = String(body.tags ?? "");
 
   const created = await db.snippet.create({
     data: {
@@ -46,6 +50,7 @@ export async function POST(req: NextRequest) {
       totalBlocks: blocks.length,
       fileSize: size,
       extractedLang: lang,
+      tags,
     },
   });
   return NextResponse.json({ id: created.id, totalBlocks: created.totalBlocks });

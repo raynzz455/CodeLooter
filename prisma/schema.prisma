@@ -18,6 +18,10 @@ model Snippet {
   totalBlocks       Int
   fileSize          Int
   extractedLang     String   @default("auto")
+  // Comma-separated tags (e.g. "statistika, modul3"). Stored as a single
+  // string for simplicity — no separate Tag model needed for SQLite. Split
+  // on `,` and trim each entry to recover the individual tag list.
+  tags              String   @default("")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

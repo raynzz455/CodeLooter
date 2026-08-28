@@ -781,3 +781,135 @@ Stage Summary:
   3. Add block search/filter (search within extracted code blocks)
   4. Add "export as JSON" (structured export with metadata)
   5. Add snippet tags/folders for organization
+
+---
+Task ID: 9-a
+Agent: full-stack-developer
+Task: Add block search/filter (search within extracted code blocks)
+
+Work Log:
+- Read existing `src/components/codelooter/result-panel.tsx` (911 lines) to understand the layout: file header card (filename + stats + lang distribution) → optional bulk-action bar → blocks/comparison/reorder view, all driven by `effectiveBlocks = blocks ?? result?.blocks ?? []`.
+- Added `Search` to the lucide-react import list (X was already imported).
+- Introduced two new useState hooks — `searchQuery: string` ("" default) and `langFilter: string` ("all" default) — next to the existing `reorderMode` state.
+- Extended the existing `useEffect([result])` reset block to also call `setSearchQuery("")` and `setLangFilter("all")` so a query from a previous file never bleeds into a newly-loaded result.
+- Added filter logic right after `effectiveBlocks` is computed:
+  - `uniqueLangs` = de-duplicated list of `b.lang` values from `effectiveBlocks` (drives the dropdown options).
+  - `trimmedQuery` = `searchQuery.trim().toLowerCase()` (trimmed + lowercased for case-insensitive substring match).
+  - `filteredBlocks` = `effectiveBlocks.filter(b => matchesText && matchesLang)` where `matchesText = trimmedQuery === "" || b.code.toLowerCase().includes(trimmedQuery)` and `matchesLang = langFilter === "all" || b.lang === langFilter`. Both conditions are AND-combined.
+  - `isFiltering` = `trimmedQuery !== "" || langFilter !== "all"` (drives the "N dari M blok" counter visibility).
+  - Documented that the file header card (stats / copy / zip / save) keeps using `effectiveBlocks` — only the visible blocks list renders `filteredBlocks`.
+- Added the search bar UI between the file header card (`</motion.div>`) and the bulk action bar:
+  - Wrapped in `motion.div` with `initial={{opacity:0,y:-4}} animate={{opacity:1,y:0}}` (fade-in on result load).
+  - Container styling: `rounded-lg border border-border bg-card p-2` with `flex flex-wrap items-center gap-2`.
+  - Left: `Search` lucide icon absolutely positioned inside a relative text input wrapper (`pl-8` for the icon, `pr-8` to make room for the X clear button).
+  - Text input: `h-8` (matches the select's compact height), `text-xs`, `bg-background`, placeholder "Cari dalam blok kode...", emerald focus ring (`focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30`).
+  - Clear (X) button: only rendered when `searchQuery` is non-empty, absolutely positioned on the right, aria-labeled "Bersihkan pencarian", calls `setSearchQuery("")`.
+  - Language filter: native `<select>` with `h-8 text-xs`, options "Semua bahasa" (value "all") + one `<option>` per `uniqueLangs` entry.
+  - "N dari M blok" counter: only rendered when `isFiltering` is true, uses `text-[11px] text-muted-foreground`.
+  - Only rendered when `viewMode === "extracted" && !reorderMode && effectiveBlocks.length > 0` (no search bar in comparison view, reorder mode, or when no blocks were extracted).
+- Modified the blocks-list render branch:
+  - Inserted a new `filteredBlocks.length === 0` empty-state branch (after the `reorderMode` branch, before the normal `AnimatePresence` map). Shows a `Search` icon in a muted circle, the message "Tidak ada blok cocok dengan pencarian", helper text, and a "Bersihkan pencarian" button that resets both `searchQuery` and `langFilter`. Wrapped in `motion.div` for a fade-in.
+  - Swapped `effectiveBlocks.map(...)` → `filteredBlocks.map(...)` in the `AnimatePresence mode="popLayout"`.
+  - Changed the per-card `transition` delay from `b.index * 0.04` to `i * 0.04` (use the filtered-list position so the stagger stays smooth when blocks are filtered out).
+  - Updated `isLast` from `i === effectiveBlocks.length - 1` to `b.index === effectiveBlocks[effectiveBlocks.length - 1]?.index` — so the "merge with next" button is hidden only for the truly last block in `effectiveBlocks`, not the last visible block. This prevents the filter from accidentally hiding a merge action that still has a valid target.
+- Ran `bun run lint` — passed with zero errors. Verified the dev server log shows no compile errors.
+
+Stage Summary:
+- CodeLooter's ResultPanel now supports in-block search & language filtering: a search bar (Search icon + text input + X clear button + native language `<select>`) sits below the file header card and above the blocks list.
+- Filter logic: case-insensitive substring match on `b.code` AND exact-equality match on `b.lang` (or "all"). Both conditions AND-combined. The file header card stats (total block count, language distribution, line totals) and all bulk operations (copy / zip / save / download) still operate on the full `effectiveBlocks` — only the visible blocks list renders `filteredBlocks`.
+- An "N dari M blok" counter appears next to the filter when filtering is active.
+- An empty-state card ("Tidak ada blok cocok dengan pencarian" + "Bersihkan pencarian" button) renders when the filter narrows the list to zero, so the user can reset with one click.
+- Search state is automatically reset whenever a new result arrives (added to the existing `useEffect([result])`).
+- Styling uses the emerald/teal palette (no blue/indigo), `h-8 text-xs` compact select, framer-motion fade-in for both the search bar and the no-matches empty state.
+- `bun run lint` passes with zero errors. Only `src/components/codelooter/result-panel.tsx` was modified.
+
+---
+Task ID: 9-b
+Agent: full-stack-developer
+Task: Add JSON export + snippet tags for organization
+
+Work Log:
+- Read prior worklog entries (Tasks 1–8) and existing source: `prisma/schema.prisma`, snippet API routes, `codelooter-api.ts`, `result-panel.tsx`, `snippet-list.tsx`, `page.tsx`, `download/route.ts` for full context.
+- **Feature 1 — Export as JSON** (`result-panel.tsx`):
+  - Imported `Braces` icon, added `exportingJson` state mirroring `exportingHtml`.
+  - Added `handleDownloadJson()` handler that builds a structured JSON payload `{ filename, fileSize, totalBlocks, extractedAt (ISO), stats (or null), blocks: [{ index, lang, code, lines, source }] }`, creates a `Blob` with `type="application/json;charset=utf-8"`, and triggers client-side download as `${base}_export.json`. Toasts `JSON dengan N blok dibuat`.
+  - Added a "JSON" button in the file header button group immediately after the "HTML" button. `outline` variant, `Braces` icon, `Loader2` spinner while exporting, `hidden sm:inline` responsive label.
+- **Feature 2 — Snippet Tags**:
+  - **Schema** (`prisma/schema.prisma`): added `tags String @default("")` to `Snippet`. Ran `bun run db:push` — applied cleanly.
+  - **List/Create API** (`src/app/api/snippets/route.ts`): GET adds `tags: true` to the Prisma select; POST reads optional `tags` from body (defaults to `""`) and persists on create.
+  - **Detail/Update API** (`src/app/api/snippets/[id]/route.ts`): GET returns `tags`; PATCH conditionally accepts `tags` — only includes the column in the UPDATE when the client explicitly sends a `tags` key (verified via Prisma query log: SQL omits `tags` when not provided, so existing tags are preserved).
+  - **Client API** (`src/lib/codelooter-api.ts`): added `tags?: string` to `SnippetMeta` and `SnippetDetail`; extended `saveSnippet(...)` with optional `tags` 5th arg and `updateSnippet(...)` with optional `tags` 4th arg (only included in PATCH payload when provided).
+  - **ResultPanel** (`result-panel.tsx`): imported `Tag` icon + shadcn `Input`; added `tagInput` state; new `currentTags?` prop + `useEffect([currentTags])` syncs input from parent; existing `useEffect([result])` also clears `tagInput` on fresh extraction. `handleSave` forwards `tagInput.trim()` and `onSaved(id, tags)` extended so parent can adopt tags. `handleUpdate` forwards `tagInput.trim()` to `onUpdateSnippet(id, blocks, tags)`. Added a tag input row in the file header below the filename row (emerald `Tag` icon + Input with placeholder "Tag (pisah dengan koma)..." and aria-label).
+  - **SnippetList** (`snippet-list.tsx`): imported `Tag` icon; added `parseTags(tags)` helper (split / trim / filter-empty); extended client-side search to match against tags; refactored per-snippet map to block body so `parseTags` runs once per row; renders tag badges below the block-count + time row when `tagList.length > 0` (small emerald pills, flex-wrap).
+  - **page.tsx**: added `currentTags` state (mirrors `currentSnippetId`); all extraction / batch / history / clear paths now also set `currentTags = undefined`; `handleSelectSnippet` sets `currentTags = detail.tags`; `handleUpdateSnippet` accepts optional `tags`, forwards to `updateSnippet`, and on success sets `currentTags = updated.tags`; passed `currentTags={currentTags}` prop to `<ResultPanel>`; extended `onSaved` to also adopt tags.
+- **Verification**:
+  - `bun run lint` → exit code 0 ✓
+  - `bun run db:push` → schema in sync ✓
+  - Started dev server (was not auto-running) and ran end-to-end curl tests against the live API:
+    - POST `/api/snippets` with `tags:"statistika, modul3"` → 200, snippet created with tags ✓
+    - GET `/api/snippets` → returns `tags` field (new snippet has tags, older ones have `""`) ✓
+    - GET `/api/snippets/{id}` → returns `tags` ✓
+    - PATCH with new tags → tags updated to `"regresi, uji-t"` ✓
+    - PATCH without `tags` → tags preserved (SQL UPDATE omits the column — confirmed via Prisma query log) ✓
+    - DELETE → 200 ✓
+  - Prisma query log confirms `tags` column is included in SELECT / INSERT / UPDATE / DELETE statements.
+
+Stage Summary:
+- Two new features shipped end-to-end (schema → API → client lib → UI) with no lint errors and no schema-migration warnings.
+- **JSON export**: a 6th export button ("JSON") joins the existing Download / ZIP / HTML trio in the ResultPanel header. Produces a self-describing, pretty-printed JSON file (`${base}_export.json`) with file metadata, an ISO extraction timestamp, the full `stats` object (when present), and the per-block `{ index, lang, code, lines, source }` payload. Built entirely client-side, no new API route.
+- **Snippet tags**: snippets now carry a comma-separated `tags` string (stored as a simple column on the `Snippet` model — no join table for the SQLite sandbox). The tags are editable from a new input field in the ResultPanel file header, persisted on both Save (new snippet) and Update (PATCH existing), displayed as small emerald badges under each row in the SnippetList, and searchable from the existing snippet search box. The PATCH endpoint conditionally includes `tags` in the UPDATE SQL only when the client sends the key, so callers that only want to update code don't accidentally wipe an existing tag set.
+- All color usage stays within the emerald/teal palette (with amber for the existing "Update" button) — no blue or indigo introduced.
+- The new `tags` field is fully optional across the stack: existing snippets default to `""`, the SnippetList only renders the badge row when `parseTags(tags).length > 0`, and the tag input is empty for fresh extractions. No backwards-compat breakage.
+
+---
+Task ID: 9
+Agent: webDevReview (cron round 8)
+Task: Block search/filter + JSON export + snippet tags.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-8) — Phase 1 extraction complete, block language override + bulk operations + editable blocks state fix added in Task 8.
+- Performed QA: server stable, lint passes, 9/9 extraction checks pass. No new bugs found.
+- Focused this round on 3 new features from the Task 8 priority recommendations:
+
+**Feature 1: Block Search/Filter (Task 9-a, via subagent)**
+- Added a search bar to ResultPanel (below file header, above blocks list).
+- `Search` icon + text input with placeholder "Cari dalam blok kode..." + X clear button.
+- Language filter dropdown (native `<select>`) with "Semua bahasa" + unique languages from current blocks.
+- Filter logic: case-insensitive substring match on `b.code` AND language match. Both conditions must be true.
+- File header stats still reflect ALL blocks (not filtered). "N dari M blok" counter shown when filtering.
+- Empty state: "Tidak ada blok cocok dengan pencarian" with clear-search button.
+- Search resets on new result.
+- Framer-motion fade-in for search bar appearance.
+
+**Feature 2: Export as JSON (Task 9-b, via subagent)**
+- Added "JSON" button to ResultPanel header (after HTML button) with `Braces` icon.
+- Builds structured JSON: `{ filename, fileSize, totalBlocks, extractedAt, stats, blocks: [{index, lang, code, lines, source}] }`.
+- Client-side Blob download as `${base}_export.json`. Toast: `JSON dengan N blok dibuat`.
+
+**Feature 3: Snippet Tags (Task 9-b, via subagent)**
+- **Schema**: Added `tags String @default("")` to Snippet model. Ran `bun run db:push`.
+- **API**: GET (list & detail) returns `tags`; POST accepts `tags`; PATCH conditionally updates `tags` only when explicitly sent.
+- **Client lib**: Added `tags?: string` to SnippetMeta/SnippetDetail; saveSnippet/updateSnippet accept optional tags.
+- **ResultPanel**: Tag input field below filename row (Tag icon + shadcn Input). Pre-populated from `currentTags` prop. Passed through on Save and Update.
+- **SnippetList**: Tags parsed and shown as small emerald badges under each row. Search matches tags too.
+- **page.tsx**: `currentTags` state mirrors `currentSnippetId`; all extraction/batch/history/clear paths reset it.
+
+- Verified all endpoints and features (in single bash call to keep server alive):
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - Tags API: POST creates snippet with tags, GET returns tags, PATCH updates tags ✓
+  - All existing endpoints still work (page, md, pdf) ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports block search/filter (by keyword + language), JSON export (structured with metadata), and snippet tags (comma-separated, shown as badges, searchable). All API endpoints work correctly. Lint passes cleanly.
+- **Completed modifications**: 3 new features (search/filter + JSON export + tags). Prisma schema updated with `tags` field. Modified result-panel.tsx, snippet-list.tsx, codelooter-api.ts, snippets API routes, page.tsx. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server (turbopack) had cache corruption issues this round — switched to `--webpack` dev mode in package.json for stability. Turbopack cache database corruption required removing `.next` and `.turbo` directories. Webpack mode is more stable but slightly slower to compile.
+  - Dev server still crashes under heavy browser load (4GB cgroup memory limit). All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): OCR progress indicator, clear UI separation
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add snippet folders/categories (beyond flat tags)
+  4. Add "recently used tags" autocomplete in tag input
+  5. Add block bookmarking (mark important blocks for quick access)
