@@ -87,3 +87,50 @@ Stage Summary:
   3. Consider migrating from turbopack to webpack for dev mode (more memory-stable, but slower compilation)
   4. Add batch extraction (multiple files at once)
   5. Add export to ZIP (all blocks as separate files in a zip)
+
+---
+Task ID: 3
+Agent: webDevReview (cron round 2)
+Task: QA assessment + bug fixes + batch extraction + stats visualization + styling improvements.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-2) — Phase 1 extraction complete, 7 features added in Task 2.
+- Performed QA via agent-browser and code review. Found 1 bug:
+  1. **stats-bar.tsx cache icon bug**: The "from cache" badge used a spinning `Loader2` icon, which misleadingly looks like "loading" instead of "cache hit". Fixed by replacing with a `Database` icon. Also added contextual icons to all stat items (Zap, GitMerge, Eraser, Filter, Clock) and hover tooltips.
+
+- Added 4 new features:
+  1. **Batch extraction** (`POST /api/extract/batch`): New API endpoint that accepts multiple files via FormData and processes them sequentially. Returns `{ results: [{ filename, blocks, total, size, stats, error? }] }`. Max 10 files, 50MB each. Client API `extractBatch()` added to codelooter-api.ts.
+  2. **Multi-file upload UI** (upload-panel.tsx): File input now accepts `multiple`. Selected files shown as a list with remove buttons. When >1 file selected, shows "X file siap diekstrak (batch)" and the extract button label changes to "Ekstrak N file (batch)".
+  3. **Batch results view** (page.tsx `BatchResultsView`): Shows a summary card with total files/blocks/lines, then a list of per-file results. Each result card shows block count, line count, file size, and stat badges (wraps repaired, narrative filtered). Clicking a result opens it in the full ResultPanel. Error files show red border with error message.
+  4. **Extraction statistics chart** (`stats-chart.tsx`): A horizontal bar chart using recharts (already installed) that visualizes the 4 Phase 1 fix metrics: line-wraps repaired, blocks merged, R-output stripped, narrative filtered. Only shows when at least one metric > 0. Each bar is color-coded to match the stats bar.
+
+- Improved styling:
+  1. **Loading skeleton** (`loading-skeleton.tsx`): Replaced the simple spinner loading state with a detailed skeleton that shows the file header, stats bar, and 3 block placeholders with shimmer animation. Uses the shadcn Skeleton component.
+  2. **Stats bar icons**: Each stat item now has a contextual icon (Database for cache, Zap for wraps, GitMerge for merges, Eraser for R-output, Filter for narrative, Clock for duration).
+  3. **Stats bar tooltips**: Each stat item has a `title` attribute for hover tooltips.
+  4. **Batch result cards**: Color-coded (emerald for success, rose for errors), with stat badges showing wraps/filtered counts inline.
+
+- Verified all API endpoints via curl:
+  - Single extraction (MD): 2 blocks ✓
+  - Single extraction (PDF): 2 blocks, 2 wraps repaired ✓
+  - **Batch extraction (3 files)**: test.md (2 blocks), test_modul.pdf (2 blocks), paste_test.txt (1 block) — all 5 blocks extracted correctly ✓
+  - Extraction verify suite: 9/9 checks pass ✓
+  - Lint: passes cleanly ✓
+
+- Verified via agent-browser:
+  - Page loads with no console errors ✓
+  - All UI elements present (theme toggle, sample button, upload/paste toggle) ✓
+  - Screenshot saved ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports batch extraction (multiple files at once), visual statistics charts, loading skeletons, and improved stat bar with contextual icons. All API endpoints work correctly. Lint passes cleanly.
+- **Completed modifications**: 1 bug fix (cache icon), 4 new features (batch extraction API + UI + results view + stats chart), loading skeleton, styling improvements. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit). Turbopack compilation + chromium can OOM-kill. All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+- **Priority recommendations for next phase**:
+  1. Phase 2 (UX): inline snippet editor, OCR progress indicator
+  2. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  3. Add ZIP export (all blocks as separate files in a zip) — needs a ZIP library
+  4. Add block drag-and-drop reordering (@dnd-kit already installed)
+  5. Add "before/after" comparison view showing removed narrative/R-output

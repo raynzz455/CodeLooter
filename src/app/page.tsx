@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState, useEffect } from "react";
-import { FileSearch, Sparkles, Wand2, ShieldCheck, Zap, X, Keyboard } from "lucide-react";
+import { FileSearch, Sparkles, Wand2, ShieldCheck, Zap, X, Keyboard, Layers } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { Header } from "@/components/codelooter/header";
@@ -11,7 +11,9 @@ import { ResultPanel } from "@/components/codelooter/result-panel";
 import { SnippetList } from "@/components/codelooter/snippet-list";
 import {
   extractFile,
+  extractBatch,
   type ExtractResult,
+  type BatchResult,
   type SnippetDetail,
   type CodeBlock,
 } from "@/lib/codelooter-api";
@@ -75,12 +77,14 @@ summary(vp)
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ExtractResult | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchResult[] | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   const handleExtract = useCallback(async (file: File, lang: string) => {
     setLoading(true);
     setResult(null);
+    setBatchResults(null);
     try {
       const r = await extractFile(file, lang);
       setResult(r);
@@ -96,6 +100,27 @@ export default function Home() {
     }
   }, []);
 
+  const handleBatchExtract = useCallback(async (files: File[], lang: string) => {
+    setLoading(true);
+    setResult(null);
+    setBatchResults(null);
+    try {
+      const results = await extractBatch(files, lang);
+      setBatchResults(results);
+      const totalBlocks = results.reduce((sum, r) => sum + r.total, 0);
+      const errors = results.filter((r) => r.error).length;
+      if (errors > 0) {
+        toast.warning(`${files.length} file · ${totalBlocks} blok · ${errors} error`);
+      } else {
+        toast.success(`${files.length} file · ${totalBlocks} blok diekstrak`);
+      }
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal mengekstrak batch");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const handleLoadSample = useCallback(async () => {
     const file = new File([SAMPLE], "modul3_sample.txt", { type: "text/plain" });
     await handleExtract(file, "r");
@@ -103,6 +128,7 @@ export default function Home() {
 
   const handleClear = useCallback(() => {
     setResult(null);
+    setBatchResults(null);
     toast.info("Hasil dibersihkan");
   }, []);
 
@@ -122,6 +148,7 @@ export default function Home() {
       stats: null,
       cached: true,
     });
+    setBatchResults(null);
     toast.success(`Snippet "${detail.filename}" dimuat`);
   }, []);
 
@@ -254,7 +281,7 @@ export default function Home() {
                   </button>
                 )}
               </div>
-              <UploadPanel onExtract={handleExtract} loading={loading} />
+              <UploadPanel onExtract={handleExtract} onBatchExtract={handleBatchExtract} loading={loading} />
             </motion.div>
             <motion.div
               initial={{ opacity: 0, x: -8 }}
@@ -268,11 +295,27 @@ export default function Home() {
 
           {/* Right column: results */}
           <section className="min-w-0">
-            <ResultPanel
-              result={result}
-              loading={loading}
-              onSaved={() => setRefreshKey((k) => k + 1)}
-            />
+            {batchResults ? (
+              <BatchResultsView
+                results={batchResults}
+                onSelectResult={(r) => {
+                  setResult({
+                    blocks: r.blocks,
+                    filename: r.filename,
+                    size: r.size,
+                    total: r.total,
+                    stats: r.stats,
+                  });
+                  setBatchResults(null);
+                }}
+              />
+            ) : (
+              <ResultPanel
+                result={result}
+                loading={loading}
+                onSaved={() => setRefreshKey((k) => k + 1)}
+              />
+            )}
           </section>
         </div>
       </main>
@@ -356,6 +399,96 @@ function ShortcutRow({ keys, desc }: { keys: string[]; desc: string }) {
           >
             {k}
           </kbd>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BatchResultsView({
+  results,
+  onSelectResult,
+}: {
+  results: BatchResult[];
+  onSelectResult: (r: BatchResult) => void;
+}) {
+  const totalBlocks = results.reduce((s, r) => s + r.total, 0);
+  const totalLines = results.reduce(
+    (s, r) => s + r.blocks.reduce((s2, b) => s2 + b.lines, 0),
+    0,
+  );
+  const errorCount = results.filter((r) => r.error).length;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm"
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <Layers className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">Batch extraction results</p>
+            <p className="text-xs text-muted-foreground">
+              {results.length} file · {totalBlocks} blok · {totalLines} baris total
+              {errorCount > 0 && ` · ${errorCount} error`}
+            </p>
+          </div>
+        </div>
+      </motion.div>
+      <div className="flex flex-col gap-2">
+        {results.map((r, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, delay: i * 0.06 }}
+          >
+            <button
+              onClick={() => onSelectResult(r)}
+              className={`flex w-full items-center gap-3 rounded-lg border bg-card p-3 text-left shadow-sm transition-all hover:shadow-md ${
+                r.error
+                  ? "border-rose-500/30 hover:border-rose-500/50"
+                  : "border-border hover:border-emerald-500/40 hover:bg-emerald-500/5"
+              }`}
+            >
+              <div
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-mono font-bold ${
+                  r.error
+                    ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                }`}
+              >
+                {r.error ? "!" : r.total}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono text-sm font-medium">{r.filename}</p>
+                <p className="text-xs text-muted-foreground">
+                  {r.error
+                    ? r.error
+                    : `${r.total} blok · ${r.blocks.reduce((s, b) => s + b.lines, 0)} baris · ${(r.size / 1024).toFixed(1)} KB`}
+                </p>
+              </div>
+              {r.stats && (
+                <div className="hidden shrink-0 gap-1.5 sm:flex">
+                  {r.stats.repairedWraps > 0 && (
+                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                      {r.stats.repairedWraps} wraps
+                    </span>
+                  )}
+                  {r.stats.filteredNarasi > 0 && (
+                    <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:text-rose-300">
+                      {r.stats.filteredNarasi} filtered
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          </motion.div>
         ))}
       </div>
     </div>

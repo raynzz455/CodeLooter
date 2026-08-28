@@ -9,6 +9,8 @@ import type { ExtractResult, CodeBlock } from "@/lib/codelooter-api";
 import { saveSnippet } from "@/lib/codelooter-api";
 import { CodeBlockCard } from "./code-block-card";
 import { StatsBar } from "./stats-bar";
+import { StatsChart } from "./stats-chart";
+import { LoadingSkeleton } from "./loading-skeleton";
 
 interface ResultPanelProps {
   result: ExtractResult | null;
@@ -112,15 +114,7 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const totalChars = effectiveBlocks.reduce((sum, b) => sum + b.code.length, 0);
 
   if (loading) {
-    return (
-      <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-        <p className="text-sm font-medium">Sedang mengekstrak kode…</p>
-        <p className="text-xs text-muted-foreground">
-          Menganalisis pola marker, memperbaiki line-wrap, dan menggabung blok
-        </p>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   if (!result) {
@@ -203,6 +197,7 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
           </div>
         )}
         {result.stats && <StatsBar stats={result.stats} />}
+        {result.stats && <StatsChart stats={result.stats} />}
       </motion.div>
 
       {/* Blocks */}

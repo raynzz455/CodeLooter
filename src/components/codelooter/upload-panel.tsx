@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { UploadCloud, FileText, Loader2, Languages, ClipboardPaste, FileUp } from "lucide-react";
+import { UploadCloud, FileText, Loader2, Languages, ClipboardPaste, FileUp, X, Files } from "lucide-react";
 import { SUPPORTED_LANGS } from "@/lib/extractor/langdetect";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 interface UploadPanelProps {
   onExtract: (file: File, lang: string) => Promise<void>;
+  onBatchExtract?: (files: File[], lang: string) => Promise<void>;
   loading: boolean;
   disabled?: boolean;
 }
@@ -16,44 +17,69 @@ const ACCEPT = ".pdf,.md,.markdown,.ipynb,.html,.htm,.txt,.tex,.latex,.sty,.cls"
 
 type Mode = "file" | "paste";
 
-export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) {
+export function UploadPanel({ onExtract, onBatchExtract, loading, disabled }: UploadPanelProps) {
   const [mode, setMode] = useState<Mode>("file");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [pastedText, setPastedText] = useState("");
   const [lang, setLang] = useState("auto");
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const isAllowed = (ext: string) => {
+    const allowed = ACCEPT.replace(/\./g, "").split(",");
+    return allowed.includes(ext);
+  };
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const f = e.dataTransfer.files?.[0];
-      if (f) setFile(f);
+      const dropped = Array.from(e.dataTransfer.files || []);
+      const valid = dropped.filter((f) => {
+        const ext = (f.name.split(".").pop() || "").toLowerCase();
+        if (!isAllowed(ext)) {
+          toast.error(`Format .${ext} tidak didukung`);
+          return false;
+        }
+        return true;
+      });
+      if (valid.length > 0) setFiles((prev) => [...prev, ...valid].slice(0, 10));
     },
     [],
   );
 
-  const handlePick = (f: File | null) => {
-    if (!f) return;
-    const ext = (f.name.split(".").pop() || "").toLowerCase();
-    const allowed = ACCEPT.replace(/\./g, "").split(",");
-    if (!allowed.includes(ext)) {
-      toast.error(`Format .${ext} tidak didukung`);
-      return;
-    }
-    setFile(f);
+  const handlePick = (picked: FileList | null) => {
+    if (!picked) return;
+    const valid = Array.from(picked).filter((f) => {
+      const ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (!isAllowed(ext)) {
+        toast.error(`Format .${ext} tidak didukung`);
+        return false;
+      }
+      return true;
+    });
+    if (valid.length > 0) setFiles((prev) => [...prev, ...valid].slice(0, 10));
+  };
+
+  const removeFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleExtract = async () => {
     if (mode === "file") {
-      if (!file) {
+      if (files.length === 0) {
         toast.error("Pilih file terlebih dahulu");
         return;
       }
-      await onExtract(file, lang);
+      if (files.length === 1) {
+        await onExtract(files[0], lang);
+      } else if (onBatchExtract) {
+        await onBatchExtract(files, lang);
+      } else {
+        // Fallback: extract one by one
+        for (const f of files) await onExtract(f, lang);
+      }
     } else {
-      // paste mode
       if (!pastedText.trim()) {
         toast.error("Tempel kode terlebih dahulu");
         return;
@@ -63,6 +89,8 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
       await onExtract(f, lang);
     }
   };
+
+  const canExtract = mode === "file" ? files.length > 0 : pastedText.trim().length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -93,50 +121,77 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
       </div>
 
       {mode === "file" ? (
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-          }}
-          className={`group relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
-            dragOver
-              ? "border-emerald-500 bg-emerald-500/5"
-              : "border-border hover:border-emerald-500/50 hover:bg-muted/40"
-          }`}
-        >
-          <input
-            ref={inputRef}
-            type="file"
-            accept={ACCEPT}
-            className="hidden"
-            onChange={(e) => handlePick(e.target.files?.[0] ?? null)}
-          />
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-            <UploadCloud className="h-6 w-6" />
+        <div className="flex flex-col gap-2">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => inputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
+            }}
+            className={`group relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+              dragOver
+                ? "border-emerald-500 bg-emerald-500/5"
+                : "border-border hover:border-emerald-500/50 hover:bg-muted/40"
+            }`}
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT}
+              multiple
+              className="hidden"
+              onChange={(e) => handlePick(e.target.files)}
+            />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <UploadCloud className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">
+                Tarik &amp; lepas file, atau klik untuk memilih
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Bisa pilih multiple file · maks 10 · 50 MB per file
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium">
-              Tarik &amp; lepas file di sini, atau klik untuk memilih
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              PDF, Markdown, IPYNB, HTML, TXT, LaTeX · maks 50 MB
-            </p>
-          </div>
-          {file && (
-            <div className="mt-1 flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-xs">
-              <FileText className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span className="font-mono font-medium truncate max-w-[180px]">{file.name}</span>
-              <span className="text-muted-foreground">
-                {(file.size / 1024).toFixed(1)} KB
-              </span>
+
+          {/* Selected files list */}
+          {files.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {files.map((f, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-xs"
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span className="truncate font-mono font-medium flex-1">{f.name}</span>
+                  <span className="text-muted-foreground shrink-0">
+                    {(f.size / 1024).toFixed(1)} KB
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(i);
+                    }}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {files.length > 1 && (
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <Files className="h-3 w-3" />
+                  {files.length} file siap diekstrak (batch)
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -145,7 +200,7 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
           <textarea
             value={pastedText}
             onChange={(e) => setPastedText(e.target.value)}
-            placeholder="Tempel teks kode atau dokumen di sini...&#10;&#10;Contoh:&#10;# Kasus 1&#10;Kode Penyelesaian:&#10;data <- data.frame(...)&#10;print(data)"
+            placeholder={"Tempel teks kode atau dokumen di sini...\n\nContoh:\n# Kasus 1\nKode Penyelesaian:\ndata <- data.frame(...)\nprint(data)"}
             className="h-48 w-full resize-y rounded-xl border-2 border-dashed border-border bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-emerald-500/50"
             spellCheck={false}
           />
@@ -162,7 +217,6 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
           <Languages className="h-3.5 w-3.5" />
           Bahasa kode
         </label>
-        {/* Native <select> — avoids bundling radix-ui Select (~big chunk). */}
         <select
           value={lang}
           onChange={(e) => setLang(e.target.value)}
@@ -182,7 +236,7 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
 
       <Button
         onClick={handleExtract}
-        disabled={loading || disabled || (mode === "file" ? !file : !pastedText.trim())}
+        disabled={loading || disabled || !canExtract}
         className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700"
       >
         {loading ? (
@@ -193,7 +247,9 @@ export function UploadPanel({ onExtract, loading, disabled }: UploadPanelProps) 
         ) : (
           <>
             <UploadCloud className="h-4 w-4" />
-            Ekstrak kode
+            {mode === "file" && files.length > 1
+              ? `Ekstrak ${files.length} file (batch)`
+              : "Ekstrak kode"}
           </>
         )}
       </Button>

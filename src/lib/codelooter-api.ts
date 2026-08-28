@@ -55,6 +55,30 @@ export async function extractFile(file: File, lang: string): Promise<ExtractResu
   return res.json();
 }
 
+export interface BatchResult {
+  filename: string;
+  blocks: CodeBlock[];
+  total: number;
+  size: number;
+  stats: ExtractStats | null;
+  error?: string;
+}
+
+export async function extractBatch(files: File[], lang: string): Promise<BatchResult[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  const res = await fetch(`/api/extract/batch?lang=${encodeURIComponent(lang)}`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(e.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.results;
+}
+
 export async function listSnippets(): Promise<SnippetMeta[]> {
   const res = await fetch("/api/snippets");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
