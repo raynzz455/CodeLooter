@@ -11,6 +11,7 @@ interface StatsBarProps {
     method: string;
     durationMs: number;
     cached?: boolean;
+    removedLines?: string[];
   } | null;
 }
 

@@ -134,3 +134,83 @@ Stage Summary:
   3. Add ZIP export (all blocks as separate files in a zip) — needs a ZIP library
   4. Add block drag-and-drop reordering (@dnd-kit already installed)
   5. Add "before/after" comparison view showing removed narrative/R-output
+
+---
+Task ID: 4-b
+Agent: full-stack-developer
+Task: Add ZIP export feature for all blocks as separate files
+
+Work Log:
+- Read worklog.md (Tasks 1-3) to understand prior work: Phase 1 extraction complete, batch extraction + stats chart + loading skeleton added in Task 3. ZIP export was listed as a priority recommendation for the next phase in both Task 2 and Task 3.
+- Verified `jszip` (^3.10.1) is already installed in node_modules.
+- **`src/lib/codelooter-api.ts`**: Added `downloadSnippetZipUrl(id)` helper returning `/api/snippets/{id}/download?format=zip`.
+- **`src/app/api/snippets/[id]/download/route.ts`**: Added `format=zip` query-parameter branch. Static `import JSZip from "jszip"` on the server. Builds a ZIP where each block becomes `block_{index}.{ext}` (extension derived per-block from the block's own language via `extForLang`). Responds with `Content-Type: application/zip` + `Content-Disposition: attachment; filename="{base}_blocks.zip"`. Includes duplicate-filename guard. Existing text and single-block behaviour unchanged. Documented all three modes in the file header comment.
+- **`src/components/codelooter/result-panel.tsx`**: Added a new "ZIP" button (`FileArchive` icon, `variant="outline"`) next to the existing "Download" (text) button. Dynamic `const JSZip = (await import("jszip")).default` import keeps jszip out of the initial client bundle. `zipping` state shows `Loader2` spinner + "Zipping…" label while generating. Toast on success (`ZIP dengan N file dibuat`) and on error. Added a shared `extForLang` helper covering all 12 languages from the spec (r→.R, python→.py, sql→.sql, java→.java, cpp→.cpp, javascript→.js, typescript→.ts, php→.php, kotlin→.kt, go→.go, rust→.rs, bash→.sh, default→.txt).
+- **`src/components/codelooter/snippet-list.tsx`**: Replaced the single `FileCode` download icon with two anchor links — a `Download` icon (text format) and a `FileArchive` icon (ZIP format) — each with a descriptive `title` tooltip. Imported `downloadSnippetZipUrl` from the API helper.
+- Inserted a 3-block test snippet (2× R, 1× Python) directly into SQLite to avoid the OOM-prone extract endpoint, then tested the ZIP API via curl.
+- **Verified via curl**:
+  - `GET /api/snippets/{id}/download?format=zip` → HTTP 200, `Content-Type: application/zip`, `Content-Disposition: attachment; filename="sample_module_blocks.zip"`, 502 bytes.
+  - `unzip -l` shows 3 files: `block_0.R` (106 B), `block_1.R` (49 B), `block_2.py` (66 B). Extracted contents verified correct.
+  - Text format (`?block=-1`) and single-block format (`?block=0`) still return HTTP 200 with correct content.
+  - 404 for non-existent snippet (both formats) returns HTTP 404 JSON error.
+- Cleaned up the test snippet from the DB after verification.
+- `bun run lint` passes cleanly (no errors).
+- Wrote work record to `/home/z/my-project/agent-ctx/4-b-full-stack-developer.md`.
+
+Stage Summary:
+- **ZIP export feature is complete and verified.** Users can now download all extracted code blocks as separate files inside a single ZIP archive — both from the ResultPanel (new "ZIP" button next to the existing "Download" text button) and from the saved SnippetList (new `FileArchive` icon link next to the existing text-download icon). The server-side API supports `?format=zip` on `GET /api/snippets/[id]/download`.
+- **Per-block file extensions**: r→.R, python→.py, sql→.sql, java→.java, cpp→.cpp, javascript→.js, typescript→.ts, php→.php, kotlin→.kt, go→.go, rust→.rs, bash→.sh, default→.txt — applied per-block (each block's own language), so a mixed-language extraction produces correctly-named files in the same ZIP.
+- **Bundle optimisation**: jszip is imported statically on the server (route.ts) and dynamically on the client (result-panel.tsx) to keep the initial client bundle small.
+- **No blue/indigo colours** — the ZIP button uses neutral `variant="outline"`; the existing emerald accent on the Save button is preserved.
+- **Known infrastructure issue (unchanged from Tasks 2-3)**: the dev server in the 4GB cgroup can transiently OOM-kill on the *first* `?format=zip` request because Turbopack must compile the jszip-bundled route. Pre-warming the text route first, then hitting the ZIP route, is the reliable sequence. This is an environment limitation, not a code bug — the ZIP API itself works correctly once compiled.
+
+---
+Task ID: 4
+Agent: webDevReview (cron round 3)
+Task: ZIP export + before/after comparison view + extractor improvements.
+
+Work Log:
+- Reviewed worklog.md (Tasks 1-3) — Phase 1 extraction complete, batch extraction + stats chart + loading skeleton added in Task 3.
+- Performed QA: server stable, lint passes, 9/9 extraction checks pass. No new bugs found.
+- Focused this round on 2 major new features from the Task 3 priority recommendations:
+
+**Feature 1: ZIP Export (Task 4-b, via subagent)**
+- Installed `jszip` (^3.10.1).
+- Added `format=zip` query parameter to `GET /api/snippets/[id]/download` route — builds a ZIP where each block becomes `block_{index}.{ext}` (per-block language extension). Returns `Content-Type: application/zip`.
+- Added "ZIP" button to ResultPanel header (dynamic `import("jszip")` on client to keep bundle small). Shows spinner during zipping, toast on success.
+- Added `downloadSnippetZipUrl(id)` client helper.
+- Updated SnippetList to show two download icons (text + ZIP).
+- Verified via curl: 3-block snippet → ZIP with `block_0.R`, `block_1.R`, `block_2.py` (correct per-language extensions).
+
+**Feature 2: Before/After Comparison View (Task 4-a, implemented directly)**
+- **Extractor changes**: Added `removedLines: string[]` to `PatternExtractStats` and `ExtractStats` interfaces. The `extractCodeBlocksFromText` function now collects lines classified as narrative or R-output during extraction (capped at 200 lines to keep response small). This data flows through the extractor pipeline to the API response.
+- Bumped `EXTRACTOR_VERSION` to `phase1-v1.1.0` (cache invalidation for the new field).
+- Created `src/components/codelooter/comparison-view.tsx`: A side-by-side layout showing:
+  - Left/top: Extracted code blocks (emerald border, clean code)
+  - Right/bottom: Removed lines (color-coded: R-output `##` in amber, narrative in rose)
+  - Summary bar with total extracted lines vs removed lines count
+  - Framer-motion staggered animations for each removed line
+- Integrated into ResultPanel: Added a "Bandingkan" (Compare) toggle button that appears only when `removedLines.length > 0`. Toggles between "extracted" view (default block cards) and "comparison" view (side-by-side). Button turns rose-colored when active.
+- Updated `StatsBar` props to accept `removedLines` for type compatibility.
+- Verified via curl: PDF extraction returns `removedLines` array with 8 entries (narrative headers + R-output lines).
+
+- Verified all endpoints:
+  - Lint: passes cleanly ✓
+  - Extraction: 9/9 verify checks pass ✓
+  - PDF API: returns `removedLines` (8 lines) + `strippedROutput: 2` + `filteredNarasi: 2` ✓
+  - ZIP API: returns valid ZIP with correct per-block file extensions ✓
+  - Browser: page loads, all UI elements present, no console errors ✓
+
+Stage Summary:
+- **Current project status**: Phase 1 extraction is stable and verified. The app now supports ZIP export (all blocks as separate per-language files in a ZIP) and a before/after comparison view that shows exactly which narrative and R-output lines were removed during extraction. The extractor now returns `removedLines` data for transparency. Extractor version bumped to v1.1.0.
+- **Completed modifications**: 2 major features (ZIP export + comparison view), extractor pipeline extended with `removedLines` collection, 3 new/modified files (comparison-view.tsx, download route, extractor types/pattern-extract/index), extractor version bump. 9/9 extraction checks still pass.
+- **Unresolved risks**:
+  - Dev server crashes under heavy browser load (4GB cgroup memory limit). All endpoints work via curl. Mitigation: pre-warm routes before opening browser.
+  - PDF extraction uses pure-TS parser (text-based PDFs only). CID fonts / OCR out of scope.
+  - `removedLines` capped at 200 entries — very large files may have more removed lines not shown.
+- **Priority recommendations for next phase**:
+  1. Block drag-and-drop reordering (@dnd-kit already installed, not yet used)
+  2. Phase 2 (UX): inline snippet editor, OCR progress indicator
+  3. Phase 3 (Reliability): unit test suite with ground-truth fixtures, dead-code cleanup
+  4. Add "copy as markdown" export (blocks as ``` fenced code blocks)
+  5. Add extraction presets (R stats module, Python notebook, SQL scripts)

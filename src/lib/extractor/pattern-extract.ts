@@ -33,6 +33,7 @@ export interface PatternExtractStats {
   strippedROutput: number;
   repairedWraps: number;
   filteredNarasi: number;
+  removedLines: string[];
 }
 
 export interface PatternExtractResult {
@@ -158,6 +159,7 @@ export function extractCodeBlocksFromText(
     strippedROutput: 0,
     repairedWraps: 0,
     filteredNarasi: 0,
+    removedLines: [],
   };
 
   if (!rawText || !rawText.trim()) {
@@ -169,11 +171,24 @@ export function extractCodeBlocksFromText(
   const { lines, repairedCount } = repairLineWraps(originalLines);
   stats.repairedWraps = repairedCount;
 
-  // Count narrative lines that would otherwise look code-like — for stats.
-  for (const l of originalLines) {
-    // crude count: lines that contain '=' or '(' but are narrative.
-    if (/[=(]/.test(l) && /\b(dan|yang|untuk|menunjukkan|bahwa|karena|sehingga|the|and|for|with)\b/i.test(l)) {
-      stats.filteredNarasi++;
+  // Collect removed lines (narrative + R-output) for the before/after view.
+  // We scan all lines after repair and classify each: code, R-output, or
+  // narrative. Only non-code lines are added to removedLines (capped at 200
+  // to keep the response small).
+  const REMOVED_CAP = 200;
+  for (const l of lines) {
+    if (stats.removedLines.length >= REMOVED_CAP) break;
+    const t = l.trim();
+    if (!t) continue;
+    if (isROutput(l)) {
+      stats.removedLines.push(t);
+      stats.strippedROutput++;
+    } else if (!isCodeLine(l)) {
+      // Narrative line (prose ratio > 40% or no code signals).
+      if (/[=(]/.test(t) || /\b(dan|yang|untuk|menunjukkan|bahwa|karena|sehingga|the|and|for|with)\b/i.test(t)) {
+        stats.filteredNarasi++;
+      }
+      stats.removedLines.push(t);
     }
   }
 
@@ -316,7 +331,7 @@ export function extractCodeBlocksFromText(
 // Fallback: density-based extraction (no markers present).
 export function extractViaDensity(rawText: string): PatternExtractResult {
   const stats: PatternExtractStats = {
-    rawBlocks: 0, mergedBlocks: 0, strippedROutput: 0, repairedWraps: 0, filteredNarasi: 0,
+    rawBlocks: 0, mergedBlocks: 0, strippedROutput: 0, repairedWraps: 0, filteredNarasi: 0, removedLines: [],
   };
   if (!rawText || !rawText.trim()) return { blocks: [], stats };
 

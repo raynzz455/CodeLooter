@@ -17,6 +17,7 @@ export interface ExtractStats {
   repairedWraps: number;
   filteredNarasi: number;
   durationMs: number;
+  removedLines?: string[];
 }
 
 export interface ExtractResult {
@@ -114,4 +115,10 @@ export async function deleteSnippet(id: string): Promise<void> {
 
 export function downloadSnippetUrl(id: string, block = -1): string {
   return `/api/snippets/${id}/download?block=${block}`;
+}
+
+// URL for downloading all blocks of a snippet packaged as a single ZIP archive
+// (each block becomes a separate file: block_0.<ext>, block_1.<ext>, ...).
+export function downloadSnippetZipUrl(id: string): string {
+  return `/api/snippets/${id}/download?format=zip`;
 }

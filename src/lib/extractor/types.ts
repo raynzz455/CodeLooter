@@ -44,6 +44,9 @@ export interface ExtractStats {
   repairedWraps: number;
   filteredNarasi: number;
   durationMs: number;
+  // Lines that were classified as narrative or R-output during extraction.
+  // Used by the before/after comparison view to show what was removed.
+  removedLines: string[];
 }
 
 export interface ExtractResult {
@@ -58,4 +61,4 @@ export interface ExtractResult {
 // Bumped whenever the extraction algorithm changes — cache entries with a
 // stale version are treated as misses (Phase 3 item #10 in the PRD, applied
 // proactively here).
-export const EXTRACTOR_VERSION = "phase1-v1.0.0";
+export const EXTRACTOR_VERSION = "phase1-v1.1.0";

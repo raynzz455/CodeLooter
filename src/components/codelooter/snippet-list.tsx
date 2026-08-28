@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { History, Trash2, FileCode, Loader2, Clock, Search, X } from "lucide-react";
+import { History, Trash2, FileCode, Loader2, Clock, Search, X, Download, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import {
   deleteSnippet,
   getSnippet,
   downloadSnippetUrl,
+  downloadSnippetZipUrl,
   type SnippetMeta,
   type SnippetDetail,
 } from "@/lib/codelooter-api";
@@ -175,9 +176,17 @@ export function SnippetList({ refreshKey, onSelect }: SnippetListProps) {
                 href={downloadSnippetUrl(s.id)}
                 onClick={(e) => e.stopPropagation()}
                 className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                title="Download"
+                title="Download semua blok (teks)"
               >
-                <FileCode className="h-3.5 w-3.5" />
+                <Download className="h-3.5 w-3.5" />
+              </a>
+              <a
+                href={downloadSnippetZipUrl(s.id)}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Download semua blok (ZIP)"
+              >
+                <FileArchive className="h-3.5 w-3.5" />
               </a>
               <Button
                 size="icon"

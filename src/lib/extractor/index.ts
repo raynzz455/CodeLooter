@@ -38,6 +38,7 @@ export async function extractFromFile(opts: ExtractOptions): Promise<ExtractResu
   let stats: PatternExtractStats = {
     rawBlocks: 0, mergedBlocks: 0,
     strippedROutput: 0, repairedWraps: 0, filteredNarasi: 0,
+    removedLines: [],
   };
   let pages = 0;
 
@@ -96,6 +97,7 @@ export async function extractFromFile(opts: ExtractOptions): Promise<ExtractResu
     repairedWraps: stats.repairedWraps,
     filteredNarasi: stats.filteredNarasi,
     durationMs: Date.now() - start,
+    removedLines: stats.removedLines,
   };
 
   const result: ExtractResult = {

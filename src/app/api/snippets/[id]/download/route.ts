@@ -1,10 +1,16 @@
-// Download snippet: GET /api/snippets/[id]/download?block=-1
-//   block=-1 (default) → download ALL blocks joined into one file
-//   block=N            → download only block N
+// Download snippet:
+//   GET /api/snippets/[id]/download?block=-1
+//     block=-1 (default) → download ALL blocks joined into one text file
+//     block=N            → download only block N
+//   GET /api/snippets/[id]/download?format=zip
+//     → download ALL blocks as separate files inside a single ZIP archive
+//       (block_0.<ext>, block_1.<ext>, ...).
 //
-// File extension is chosen from the dominant language of the snippet.
+// File extension is chosen from the language of each block (zip) or the
+// dominant language of the snippet (text).
 
 import { NextRequest, NextResponse } from "next/server";
+import JSZip from "jszip";
 import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -36,6 +42,7 @@ export async function GET(
 ) {
   const { id } = await ctx.params;
   const blockParam = req.nextUrl.searchParams.get("block") ?? "-1";
+  const formatParam = req.nextUrl.searchParams.get("format");
   const blockIdx = parseInt(blockParam, 10);
 
   const snip = await db.snippet.findUnique({ where: { id } });
@@ -44,12 +51,49 @@ export async function GET(
   const blocks: { index: number; lang: string; code: string; lines: number }[] =
     JSON.parse(snip.blocksJson);
 
+  const base = snip.originalFilename.replace(/\.[^.]+$/, "") || "codelooter";
+
+  // ===== ZIP format =====
+  // Each block becomes a separate file inside the archive.
+  if (formatParam === "zip") {
+    const zip = new JSZip();
+    const used = new Map<string, number>(); // guard against duplicate filenames
+    for (const b of blocks) {
+      const ext = extForLang(b.lang);
+      let name = `block_${b.index}.${ext}`;
+      // De-duplicate in the rare case two blocks produce the same name.
+      if (used.has(name)) {
+        const n = used.get(name)! + 1;
+        used.set(name, n);
+        name = `block_${b.index}_${n}.${ext}`;
+      } else {
+        used.set(name, 0);
+      }
+      zip.file(name, b.code);
+    }
+    const zipBlob = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+    });
+    const filename = `${base}_blocks.zip`;
+    return new NextResponse(zipBlob, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  // ===== Plain text format =====
   let body = "";
   if (blockIdx === -1) {
     // All blocks, joined with a comment separator between them.
     const sep = "#".repeat(60);
     body = blocks
-      .map((b, i) => {
+      .map((b) => {
         const header = `# Block #${b.index} | ${b.lang} | ${b.lines} lines`;
         return `${sep}\n${header}\n${sep}\n${b.code}`;
       })
@@ -64,8 +108,7 @@ export async function GET(
     ? snip.extractedLang
     : (blocks[0]?.lang || "unknown");
   const ext = extForLang(dominantLang);
-  const base = snip.originalFilename.replace(/\.[^.]+$/, "");
-  const filename = `${base || "codelooter"}.${ext}`;
+  const filename = `${base}.${ext}`;
 
   return new NextResponse(body, {
     status: 200,

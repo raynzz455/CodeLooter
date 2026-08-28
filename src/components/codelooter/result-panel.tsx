@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check } from "lucide-react";
+import { Code2, Download, Save, Loader2, FileText, Boxes, Copy, Check, FileArchive, GitCompare } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { CodeBlockCard } from "./code-block-card";
 import { StatsBar } from "./stats-bar";
 import { StatsChart } from "./stats-chart";
 import { LoadingSkeleton } from "./loading-skeleton";
+import { ComparisonView } from "./comparison-view";
 
 interface ResultPanelProps {
   result: ExtractResult | null;
@@ -22,12 +23,32 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
   const [blocks, setBlocks] = useState<CodeBlock[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [zipping, setZipping] = useState(false);
+  const [viewMode, setViewMode] = useState<"extracted" | "comparison">("extracted");
+
+  // File extension per language, mirroring the server-side extForLang helper.
+  const extForLang = (lang: string): string =>
+    ({
+      r: "R",
+      python: "py",
+      sql: "sql",
+      java: "java",
+      cpp: "cpp",
+      javascript: "js",
+      typescript: "ts",
+      php: "php",
+      kotlin: "kt",
+      go: "go",
+      rust: "rs",
+      bash: "sh",
+    }[lang] ?? "txt");
 
   // BUGFIX: Reset local editable blocks whenever a new result arrives.
   // Previously, editing a block then extracting a new file would show the
   // old edited blocks instead of the fresh extraction result.
   useEffect(() => {
     setBlocks(null);
+    setViewMode("extracted");
   }, [result]);
 
   // Sync local editable blocks whenever a new result arrives.
@@ -70,6 +91,46 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("File kode diunduh");
+  };
+
+  const handleDownloadZip = async () => {
+    if (!result || effectiveBlocks.length === 0) return;
+    setZipping(true);
+    try {
+      // Dynamic import keeps jszip out of the initial client bundle.
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const used = new Map<string, number>();
+      for (const b of effectiveBlocks) {
+        const ext = extForLang(b.lang);
+        let name = `block_${b.index}.${ext}`;
+        if (used.has(name)) {
+          const n = used.get(name)! + 1;
+          used.set(name, n);
+          name = `block_${b.index}_${n}.${ext}`;
+        } else {
+          used.set(name, 0);
+        }
+        zip.file(name, b.code);
+      }
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = result.filename.replace(/\.[^.]+$/, "") || "codelooter";
+      a.download = `${base}_blocks.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`ZIP dengan ${effectiveBlocks.length} file dibuat`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Gagal membuat ZIP");
+    } finally {
+      setZipping(false);
+    }
   };
 
   const handleBlockDownload = (index: number) => {
@@ -173,6 +234,29 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
             </Button>
             <Button
               size="sm"
+              variant="outline"
+              onClick={handleDownloadZip}
+              disabled={effectiveBlocks.length === 0 || zipping}
+              title="Download semua blok sebagai file ZIP terpisah"
+            >
+              {zipping ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />}
+              <span className="hidden sm:inline">{zipping ? "Zipping…" : "ZIP"}</span>
+            </Button>
+            {/* Comparison view toggle — only show if removedLines exist */}
+            {result.stats?.removedLines && result.stats.removedLines.length > 0 && (
+              <Button
+                size="sm"
+                variant={viewMode === "comparison" ? "default" : "outline"}
+                onClick={() => setViewMode((v) => v === "comparison" ? "extracted" : "comparison")}
+                title="Bandingkan kode yang diekstrak vs baris yang dihapus"
+                className={viewMode === "comparison" ? "bg-rose-600 hover:bg-rose-700" : ""}
+              >
+                <GitCompare className="h-4 w-4" />
+                <span className="hidden sm:inline">Bandingkan</span>
+              </Button>
+            )}
+            <Button
+              size="sm"
               onClick={handleSave}
               disabled={saving || effectiveBlocks.length === 0}
               className="bg-emerald-600 hover:bg-emerald-700"
@@ -200,8 +284,10 @@ export function ResultPanel({ result, loading, onSaved }: ResultPanelProps) {
         {result.stats && <StatsChart stats={result.stats} />}
       </motion.div>
 
-      {/* Blocks */}
-      {effectiveBlocks.length === 0 ? (
+      {/* Blocks or Comparison view */}
+      {viewMode === "comparison" && result.stats?.removedLines ? (
+        <ComparisonView blocks={effectiveBlocks} removedLines={result.stats.removedLines} />
+      ) : effectiveBlocks.length === 0 ? (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
           <Boxes className="mx-auto mb-2 h-8 w-8 text-amber-600" />
           <p className="text-sm font-medium">Tidak ada blok kode terdeteksi</p>
