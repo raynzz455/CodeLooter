@@ -1,31 +1,36 @@
 # CodeLooter Dependencies
 
-## Node.js (Next.js app)
-Install semua dependency dengan: `npm install`
-
-- next ^16.2.9
-- react ^19.0.0
-- react-dom ^19.0.0
-- highlight.js ^11.11.1
-- officeparser ^7.2.2
-- lucide-react ^0.511.0
-
-## Python (PDF sidecar)
+## Python (FastAPI backend)
 Install dengan: `pip install -r requirements.txt`
 
-- pdfplumber >= 0.11.0
+# Core
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
 
-PDF extraction menggunakan Python sidecar (`scripts/pdf_extract.py`) yang
-menganalisis font monospace untuk mendeteksi code block secara presisi.
-Untuk file non-PDF, tetap menggunakan `officeparser` (Node.js).
+# PDF extraction
+pymupdf>=1.23.0
 
-## System dependencies (Linux/macOS)
-- `pdftotext` (poppler-utils) — fallback jika Python sidecar gagal
-  - Debian/Ubuntu: `apt install poppler-utils`
-  - macOS: `brew install poppler`
+# NLP model (optional — for enhanced code detection)
+# paraphrase-multilingual-MiniLM-L12-v2: ~47MB, supports 50+ languages
+# including Indonesian and English. Runs on CPU, no GPU needed.
+# Compatible with Render free tier (512MB RAM).
+sentence-transformers>=2.2.0
+numpy>=1.24.0
 
-## Verifikasi instalasi
-```bash
-python3 scripts/pdf_extract.py --help
-# Output: usage: pdf_extract.py [-h] pdf_path
-```
+# Database
+psycopg2-binary>=2.9.0
+supabase>=2.0.0
+
+# Auth
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+
+# Rate limiting
+slowapi>=0.1.9
+
+# System dependencies (Linux/macOS)
+# - poppler-utils (pdftotext fallback)
+#   Debian/Ubuntu: apt install poppler-utils
+#   macOS: brew install poppler
