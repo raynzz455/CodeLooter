@@ -1,7 +1,13 @@
 # CodeLooter Dependencies
-
-## Python (FastAPI backend)
-Install dengan: `pip install -r requirements.txt`
+#
+# Install dengan: pip install -r requirements.txt
+#
+# Semua dependency di bawah ini GRATIS dan ringan — compatible dengan
+# Render free tier (512MB RAM, shared CPU, no GPU).
+#
+# TIDAK ada LLM, TIDAK ada PyTorch, TIDAK ada TensorFlow.
+# Ekstraksi murni menggunakan pattern matching (regex) yang sudah
+# dioptimalkan dengan pre-processing pipeline.
 
 # Core
 fastapi>=0.104.0
@@ -9,15 +15,8 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 pydantic>=2.5.0
 
-# PDF extraction
+# PDF extraction (murni Python, ~20MB)
 pymupdf>=1.23.0
-
-# NLP model (optional — for enhanced code detection)
-# paraphrase-multilingual-MiniLM-L12-v2: ~47MB, supports 50+ languages
-# including Indonesian and English. Runs on CPU, no GPU needed.
-# Compatible with Render free tier (512MB RAM).
-sentence-transformers>=2.2.0
-numpy>=1.24.0
 
 # Database
 psycopg2-binary>=2.9.0
@@ -30,7 +29,6 @@ python-jose[cryptography]>=3.3.0
 # Rate limiting
 slowapi>=0.1.9
 
-# System dependencies (Linux/macOS)
-# - poppler-utils (pdftotext fallback)
-#   Debian/Ubuntu: apt install poppler-utils
-#   macOS: brew install poppler
+# NOTE: Tidak ada sentence-transformers/PyTorch/TensorFlow.
+# Ekstraksi kode 100% menggunakan pattern matching (regex) yang sudah
+# dioptimalkan. Lihat backend/app/pattern_extract.py untuk detail.
