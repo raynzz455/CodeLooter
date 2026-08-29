@@ -6,10 +6,8 @@
 //   - Removed auth/user profile (no login in our single-user sandbox).
 //   - Removed useRouter navigation — this is a single-page app.
 //   - Removed SplashScreen (no equivalent component in this project).
-//   - extractCode → extractFile (pattern) / extractFileLLM (LLM mode).
+//   - extractCode → extractFile (pattern-based, 100% free, no LLM).
 //   - saveSnippet signature now takes (filename, blocks, lang, size, tags).
-//   - Added an "AI Mode" toggle in the upload panel that routes the extract
-//     call to /api/extract-llm (z-ai-web-dev-sdk backend with pattern fallback).
 //   - Added a "SNIPPET TERSIMPAN" section below the main grid that lists
 //     saved snippets and lets the user load one back into the result panel
 //     or delete it.
@@ -28,13 +26,11 @@ import {
   FolderOpen,
   Trash2,
   Sparkles,
-  Cpu,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LANGUAGES, STATS, SAMPLE_CODES } from "@/components/codelooter/data";
 import {
   extractFile,
-  extractFileLLM,
   saveSnippet,
   listSnippets,
   deleteSnippet,
@@ -176,7 +172,6 @@ export default function Home() {
   // Upload state.
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [aiMode, setAiMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Extraction state.
@@ -277,10 +272,7 @@ export default function Home() {
   };
 
   // ─── Extract ───
-  // Routes to /api/extract-llm when AI mode is on, /api/extract otherwise.
-  // The LLM endpoint falls back to the pattern extractor server-side if the
-  // LLM call fails or times out, so a 200 is always returned (unless the
-  // upload itself is rejected).
+  // 100% pattern-based extraction. No LLM, no external API.
   const handleExtract = async () => {
     if (!uploadedFile) return;
     setIsExtracting(true);
@@ -290,9 +282,7 @@ export default function Home() {
     setExtractMeta({});
 
     try {
-      const data: ExtractResult = aiMode
-        ? await extractFileLLM(uploadedFile, selectedLang)
-        : await extractFile(uploadedFile, selectedLang);
+      const data: ExtractResult = await extractFile(uploadedFile, selectedLang);
 
       const blocks = data.blocks ?? [];
       setExtractedBlocks(blocks);
@@ -309,14 +299,12 @@ export default function Home() {
         toast.success(
           `${blocks.length} blok kode berhasil diekstrak!${data.cached ? " (cache)" : ""}`,
           {
-            description: aiMode
-              ? `🤖 AI mode · ${data.stats?.method ?? "llm"}`
-              : `⚡ ${data.stats?.method ?? "pattern"}`,
+            description: `⚡ ${data.stats?.method ?? "pattern"}`,
           },
         );
       } else {
         toast.warning("Tidak ada blok kode terdeteksi", {
-          description: "Coba bahasa lain atau aktifkan AI mode.",
+          description: "Coba bahasa lain atau periksa format file.",
         });
       }
     } catch (err) {
@@ -512,12 +500,7 @@ export default function Home() {
           }}
         >
           {extractMeta.method && (
-            <Tag
-              bg={aiMode ? "#f5f0ff" : "#d4f0e4"}
-              color="#000"
-            >
-              {aiMode ? "🤖 AI" : "⚡ PATTERN"}
-            </Tag>
+            <Tag bg="#d4f0e4" color="#000">⚡ PATTERN</Tag>
           )}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -1082,95 +1065,6 @@ export default function Home() {
                 />
               </div>
 
-              {/* AI Mode toggle */}
-              <div
-                style={{
-                  marginTop: "12px",
-                  backgroundColor: aiMode ? "#f5f0ff" : "#fef9f0",
-                  border: `3px solid ${aiMode ? "#000" : "#000"}`,
-                  borderRadius: "10px",
-                  padding: "10px 12px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  boxShadow: aiMode ? "3px 3px 0 #000" : "none",
-                  transition: "all 0.15s",
-                }}
-              >
-                <button
-                  onClick={() => setAiMode(!aiMode)}
-                  role="switch"
-                  aria-checked={aiMode}
-                  aria-label="Toggle AI mode"
-                  style={{
-                    width: 44,
-                    height: 24,
-                    borderRadius: "12px",
-                    border: "2px solid #000",
-                    backgroundColor: aiMode ? "#ff6b6b" : "#fff",
-                    cursor: "pointer",
-                    position: "relative",
-                    flexShrink: 0,
-                    padding: 0,
-                    transition: "background-color 0.15s",
-                  }}
-                >
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: 2,
-                      left: aiMode ? 22 : 2,
-                      width: 18,
-                      height: 18,
-                      borderRadius: "50%",
-                      backgroundColor: aiMode ? "#ffe8a3" : "#d4f0e4",
-                      border: "2px solid #000",
-                      transition: "left 0.15s, background-color 0.15s",
-                    }}
-                  />
-                </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p
-                    style={{
-                      fontSize: "0.85rem",
-                      fontWeight: 900,
-                      margin: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    {aiMode ? (
-                      <>
-                        <Cpu size={14} /> AI Mode AKTIF
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={14} /> AI Mode
-                      </>
-                    )}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: "0.7rem",
-                      fontWeight: 700,
-                      color: "#555",
-                      margin: 0,
-                      lineHeight: 1.3,
-                    }}
-                  >
-                    {aiMode
-                      ? "🤖 Gunakan AI (LLM) untuk ekstraksi"
-                      : "🤖 Gunakan AI (LLM) untuk ekstraksi"}
-                  </p>
-                </div>
-                {aiMode && (
-                  <Tag bg="#ff6b6b" color="#fff">
-                    LLM
-                  </Tag>
-                )}
-              </div>
-
               {/* extract button */}
               <button
                 onClick={handleExtract}
@@ -1212,35 +1106,19 @@ export default function Home() {
                 }}
               >
                 {isExtracting ? (
-                  aiMode ? (
-                    <>
-                      <div
-                        style={{
-                          width: 20,
-                          height: 20,
-                          border: "3px solid #ffe8a3",
-                          borderTopColor: "transparent",
-                          borderRadius: "50%",
-                          animation: "spin 0.7s linear infinite",
-                        }}
-                      />
-                      AI SEDANG MENGANALISIS...
-                    </>
-                  ) : (
-                    <>
-                      <div
-                        style={{
-                          width: 20,
-                          height: 20,
-                          border: "3px solid #ffe8a3",
-                          borderTopColor: "transparent",
-                          borderRadius: "50%",
-                          animation: "spin 0.7s linear infinite",
-                        }}
-                      />
-                      SEDANG MENGEKSTRAK...
-                    </>
-                  )
+                  <>
+                    <div
+                      style={{
+                        width: 20,
+                        height: 20,
+                        border: "3px solid #ffe8a3",
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "spin 0.7s linear infinite",
+                      }}
+                    />
+                    SEDANG MENGEKSTRAK...
+                  </>
                 ) : (
                   <>
                     <Zap
@@ -1448,9 +1326,7 @@ export default function Home() {
                         textAlign: "center",
                       }}
                     >
-                      {aiMode
-                        ? "AI SEDANG MENGANALISIS..."
-                        : "MENGANALISIS FILE..."}
+                      MENGANALISIS FILE...
                     </p>
                     <div style={{ display: "flex", gap: "6px" }}>
                       {[0, 1, 2, 3, 4].map((i) => (
@@ -1466,21 +1342,6 @@ export default function Home() {
                         />
                       ))}
                     </div>
-                    {aiMode && (
-                      <p
-                        style={{
-                          color: "#aaa",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          margin: 0,
-                          textAlign: "center",
-                        }}
-                      >
-                        🤖 LLM sedang membaca seluruh dokumen...
-                        <br />
-                        (lebih lambat, tapi lebih teliti)
-                      </p>
-                    )}
                   </div>
                 )}
                 {(extracted ||

@@ -31,7 +31,6 @@ export async function POST(req: NextRequest) {
     );
   }
   const lang = (req.nextUrl.searchParams.get("lang") || "").toLowerCase();
-  const useNLP = req.nextUrl.searchParams.get("nlp") === "1";
 
   // Force language selection — no auto-detect allowed.
   if (!lang || !SUPPORTED_LANGS.has(lang)) {
@@ -59,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await extractFromFile({ filename, content, lang, useNLP });
+    const result = await extractFromFile({ filename, content, lang });
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json(
