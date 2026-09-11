@@ -1666,3 +1666,64 @@ Stage Summary:
 - **Unresolved risks**: 
   - 2 minor test failures: SQL comments (`-- Created: 2024`) leak into output (they ARE valid SQL comments), and markdown table code blocks aren't split into separate blocks.
   - Dev server memory issues (4GB cgroup) — all logic verified via direct tests.
+
+---
+Task ID: 19
+Agent: frontend-styling-expert
+Task: Redesign CodeLooter UI from neo-brutalist to minimalism pastel classic
+
+Work Log:
+- Read worklog Tasks 13 and 18 to understand the existing neo-brutalist design (3px black borders, hard 5px 5px 0 #000 shadows, Bangers + Nunito fonts, bright pastel card headers, red text-shadow on the CodeLooter! logo) and multi-language extraction support. Read `globals.css`, `layout.tsx`, `data.ts`, and the full 1874-line `page.tsx` to inventory every inline style that needed to be transformed.
+
+- **`src/app/globals.css`** — Replaced the neo-brutalist CSS variables with a minimalism pastel classic palette:
+  - Background `#fef9f0` → warm off-white `#faf9f6`; foreground `#000` → charcoal `#3a3a3a`.
+  - Primary `#ff6b6b` → dusty rose `#c9a0a0`; secondary `#ffe8a3` → warm sand `#f0ead4`; accent `#d4f0e4` → soft sage `#c8d8c0`; border `#000` → `rgba(0,0,0,0.06)`.
+  - Font variables: `--font-display` now points to `var(--font-playfair)` (Playfair Display serif), `--font-body` to `var(--font-inter)` (Inter), `--font-mono` stays JetBrains Mono.
+  - Rebuilt utility classes `.cl-card`, `.cl-card-header`, `.cl-tag`, `.cl-btn` with 1px borders, 14px radius, soft `0 2px 12px rgba(0,0,0,0.04)` shadows, 500 font weight, and smooth `transition: all 0.2s ease` with `:hover` lift (`translateY(-1px)` + deeper shadow) and `:active` press (`translateY(0)`).
+  - Removed the `screenShake` and aggressive `popIn` keyframes; kept `spin` and `pulse`, and added a gentle `fadeIn` keyframe (opacity + 4px translateY) used by the dropdown menu.
+  - Made the scrollbar subtle/light (8px, `rgba(0,0,0,0.12)` thumb, hover `rgba(0,0,0,0.2)`).
+  - Kept `.stats-grid` (2-up mobile, 4-up ≥900px) and `.main-grid` (stacked mobile, 300px+1fr desktop) layouts unchanged.
+
+- **`src/app/layout.tsx`** — Swapped font imports:
+  - `Nunito` → `Inter` (weights 400, 500, 600, 700) with `--font-inter` variable.
+  - `Bangers` → `Playfair_Display` (weights 500, 600, 700) with `--font-playfair` variable.
+  - Updated metadata description from "Neo-brutalist code extraction" to "Minimalism pastel classic code extraction".
+  - Kept JetBrains Mono `<link>` (still emits the pre-existing `@next/next/no-page-custom-font` warning — unrelated to this redesign).
+
+- **`src/components/codelooter/data.ts`** — Updated pastel colors to the soft muted palette specified in the task:
+  - `LANGUAGES`: Python `#e8f0e4` (sage), R `#e4e0f0` (lavender), JavaScript `#f0ead4` (warm sand), TypeScript `#e0e8f0` (soft blue), Java `#f0d4d8` (dusty rose), C++ `#d4e8f0` (soft cyan), SQL `#e8d4e8` (mauve), Kotlin `#d4f0e4` (mint).
+  - `STATS`: `#e8f0e4`, `#f0ead4`, `#e4e0f0`, `#f0d4d8` matching the language chips.
+
+- **`src/app/page.tsx`** (REWRITTEN inline styles only — all JS logic, state, handlers, hooks, JSX structure, imports preserved EXACTLY):
+  - **Primitives**: `Tag` uses 1px border, 6px radius, 500 weight, soft bg. `Card` uses white bg, 1px `rgba(0,0,0,0.06)` border, 14px radius, `0 2px 12px rgba(0,0,0,0.04)` shadow, transition on hover/active. `CardHeader` uses 1px border-bottom, 14×18 padding. `LangChip` uses 8px radius, 1px border (subtle when inactive, slightly stronger when active), 500 weight, smooth transition.
+  - **Header**: cream `rgba(255,255,255,0.85)` with `backdrop-filter: blur(8px)` for soft glassmorphism, 1px bottom border, NO hard shadow, sticky. Logo box: dusty rose `#c9a0a0` square with 1px border + soft `0 2px 8px rgba(201,160,160,0.25)` shadow + white Code2 icon. "CodeLooter!" in Playfair Display, weight 600, charcoal `#3a3a3a` — NO textShadow. BETA tag: dusty rose pill `#f0d4d8` bg, dark mauve text, 999px radius, uppercase 0.66rem. "Pilih File" button: charcoal `#3a3a3a` bg, cream text, 10px radius, soft shadow — uses `.cl-btn` CSS class for hover.
+  - **Stats grid**: white cards with 1px border + soft shadow + 3px colored top accent strip matching each stat's pastel color. Numbers in Playfair Display 600 weight charcoal; labels in Inter 500 weight muted gray.
+  - **COL 1 — Pilih Bahasa**: CardHeader bg `#faf7f2` (soft cream). Detected langs panel: soft sage `#e8f0e4` with 1px border. Dropdown button: white bg, 1px border, soft shadow, current-lang emoji shown in a small pastel square. Dropdown menu: fadeIn animation (not popIn), 1px border, `0 8px 24px rgba(0,0,0,0.08)` shadow, hover state cream. Info card: current-lang color bg + 1px border. Hint box: dashed 1px border, cream bg.
+  - **COL 2 — Upload File**: CardHeader bg `#f5f8f3` (soft sage tint). Drop zone: cream `#faf9f6` bg with 2px dashed `rgba(0,0,0,0.14)` border (turns sage `#a3b8a0` + sage bg `#e8f0e4` on drag). Upload icon: white circle with soft shadow, dusty rose icon color. File preview card: white bg, 1px border, soft shadow; remove button: transparent with 1px border, hover turns red. Extract button: dusty rose `#c9a0a0` bg, white text, 10px radius, `0 4px 14px rgba(201,160,160,0.3)` shadow — uses `.cl-btn` for hover (NO onMouseDown/onMouseUp press animation). Disabled state: light gray bg, no shadow.
+  - **COL 3 — Hasil Ekstraksi**: CardHeader bg `#f6f5fb` (soft lavender tint). Three pastel dots (terracotta/lavender/sage) for the classic window-control motif. Status pill: soft pastel bg (sage/sand/rose depending on state) + 999px radius + small dot indicator. Code viewport: dark warm `#2a2826` bg with light cream `#e8e4dc` text — gives a refined classic code-editor feel. Empty state: `???` in Playfair 500 weight gray, helper text in Inter 400. Loading: pulse animation on "Menganalisis file..." text + 5 pulsing dots. Meta badge: `rgba(20,18,16,0.7)` bg with `backdrop-filter: blur(6px)`. Action buttons (Save / Download / Copy): outlined style — white bg, 1px tinted border, soft shadow, 999px radius, muted pastel text colors — all use `.cl-btn` for hover (NO press animations). Copy button morphs to sage bg + checkmark when copied.
+  - **Snippet Tersimpan section**: white card with 1px border + soft shadow. Header bg `#faf7f2`, 1px bottom border, FolderOpen icon in muted gray, Playfair title. Refresh button: white outlined `.cl-btn`. Snippet cards: white bg, 1px border, soft `0 2px 8px` shadow, 12px radius, 30px pastel lang-icon square, Playfair filename. Tags use the new pastel palette. Muat button: charcoal filled; Delete button: outlined red.
+  - **Footer**: cream `#faf7f2` bg, 1px top border (NO hard shadow), Inter 400 weight, muted gray text, "Beta" in dusty rose. Sticky to bottom via existing `marginTop: "auto"` pattern.
+  - All `border: "3px solid #000"` → `border: "1px solid rgba(0,0,0,0.06)"` (or color-tinted variants).
+  - All `boxShadow: "Npx Npx 0 #000"` → `boxShadow: "0 Npx Mpx rgba(0,0,0,0.04-0.08)"` soft diffused shadows.
+  - All `fontWeight: 900` → `500` or `600`.
+  - All `fontFamily: "var(--font-display)"` retained (now resolves to Playfair Display via globals.css).
+  - All `onMouseDown`/`onMouseUp` press animations removed; replaced with `.cl-btn` CSS class providing `:hover`/`:active` transitions.
+  - All `textShadow` on the logo removed.
+  - Copy labels softened: "BOOM! Salin Kode" → "Salin Kode"; "TERSALIN!" → "Tersimpan! Simpan Ulang" stays; "EKSTRAK KODE!" → "Ekstrak Kode"; "EKSTRAK ULANG!" → "Ekstrak Ulang"; "SEDANG MENGEKSTRAK..." → "Sedang mengekstrak..."; "PILIH FILE" → "Pilih File"; "MENGANALISIS FILE..." → "Menganalisis file...".
+
+Verification:
+- `bun run lint` → exit code 0 ✓. Only the 1 pre-existing `@next/next/no-page-custom-font` warning on layout.tsx line 42 (the JetBrains Mono `<link>` — pre-existing, unrelated to this redesign).
+- `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/` → HTTP 200 in 98ms ✓.
+- `dev.log` shows clean compile: `GET / 200 in 631ms (compile: 269ms, render: 361ms)` — no errors, no warnings ✓.
+- HTML content audit: all "opening pages" sections present — CodeLooter brand (2 occurrences), Pilih Bahasa, Upload File, Hasil Ekstraksi, Snippet Tersimpan, Beta tag ✓.
+- Inline style audit: 12 `font-family:var(--font-display)` (Playfair), 16 `font-family:var(--font-body)` (Inter), 1 `font-family:var(--font-mono)` (JetBrains Mono) ✓.
+- Neo-brutalist styles eliminated: 0 `3px solid #000`, 0 hard offset `Npx Npx 0 #000` shadows, 0 `textShadow`, 0 `fontWeight:900` or `800`, 0 Bangers/Nunito references ✓.
+- Pastel palette confirmed in rendered HTML: `#faf9f6` (cream bg), `#faf7f2`/`#f5f8f3`/`#f6f5fb` (section header bg tints), `#f0ead4`/`#e8f0e4`/`#e4e0f0`/`#f0d4d8` (accent pastels), `#c9a0a0` (terracotta primary) ✓.
+- All JavaScript logic preserved EXACTLY: imports (ChevronDown, Code2, FileText, Upload, X, Zap, Copy, Check, Save, FolderOpen, Trash2, Sparkles), state (selectedLang, dropdownOpen, uploadedFile, isDragging, isExtracting, extractedBlocks, extractError, extractMeta, copied, saving, savedSnippetId, snippets, loadingSnippets), refs (fileInputRef, langDropdownRef), handlers (setFile, handleDrop, handleFileInput, handleExtract, handleSave, handleLoadSnippet, handleDeleteSnippet, handleCopy, handleDownload), effects (refreshSnippets on mount, outside-click dropdown close), and component structure (Tag, Card, CardHeader, LangChip primitives + main Home component) — all untouched.
+- Responsive layout preserved: `.stats-grid` (2-up mobile, 4-up ≥900px) and `.main-grid` (stacked mobile, 300px+1fr desktop) CSS unchanged.
+- Footer sticky to bottom preserved via existing `marginTop: "auto"` pattern on the footer + flex column layout on the outer div.
+
+Stage Summary:
+- **UI fully transformed** from neo-brutalist to minimalism pastel classic: warm off-white `#faf9f6` background, white cards with 1px `rgba(0,0,0,0.06)` borders and soft diffused `0 2px 12px rgba(0,0,0,0.04)` shadows, dusty rose `#c9a0a0` primary accent, Playfair Display serif for headings + Inter sans-serif for body + JetBrains Mono for code. All "opening pages" content preserved (header with CodeLooter! logo + Beta tag, 4-card stats grid, 3-column main layout Pilih Bahasa / Upload File / Hasil Ekstraksi, Snippet Tersimpan grid, sticky footer). All functionality preserved (language dropdown, file upload + drag-drop, extract button, copy/download/save actions, snippet load/delete, refresh). All press animations (onMouseDown/onMouseUp) removed and replaced with `.cl-btn` CSS `:hover`/`:active` transitions. Logo textShadow removed. Aggressive caps copy softened.
+- **Key files**: `globals.css` (CSS variables + utility classes + animations rewritten), `layout.tsx` (Inter + Playfair_Display fonts via next/font/google), `data.ts` (8 LANGUAGES + 4 STATS colors updated to soft pastels), `page.tsx` (all inline styles rewritten to pastel classic — 12 Playfair refs, 16 Inter refs in rendered HTML).
+- **Unresolved risks**: Dev server memory issues (4GB cgroup) — same known issue from Tasks 13–18; verification done via curl with setsid-detached dev server (HTTP 200 in 98ms after warm compile).

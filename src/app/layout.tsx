@@ -1,27 +1,27 @@
 import type { Metadata } from "next";
-import { Nunito, Bangers } from "next/font/google";
+import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/codelooter/theme-provider";
 
-const nunito = Nunito({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-nunito",
-  weight: ["400", "600", "700", "800", "900"],
+  variable: "--font-inter",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
-const bangers = Bangers({
+const playfair = Playfair_Display({
   subsets: ["latin"],
-  variable: "--font-bangers",
-  weight: "400",
+  variable: "--font-playfair",
+  weight: ["500", "600", "700"],
   display: "swap",
 });
 
 export const metadata: Metadata = {
   title: "CodeLooter — Ekstrak Kode dari Dokumen",
   description:
-    "Ambil semua kode dari PDF, DOCX, Markdown, IPYNB secara instan. Neo-brutalist code extraction.",
+    "Ambil semua kode dari PDF, DOCX, Markdown, IPYNB secara instan. Minimalism pastel classic code extraction.",
   keywords: ["code extractor", "pdf to code", "ekstrak kode", "CodeLooter"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
@@ -34,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" suppressHydrationWarning className={`${nunito.variable} ${bangers.variable}`}>
+    <html lang="id" suppressHydrationWarning className={`${inter.variable} ${playfair.variable}`}>
       <head>
         {/* JetBrains Mono untuk code block */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />

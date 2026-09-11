@@ -1,7 +1,7 @@
 // CodeLooter — UI data constants
 // Ported from the original CodeLooter repo's components/data.ts so the
-// neo-brutalist page has language metadata, demo stats, and sample code
-// snippets for the empty-state preview.
+// minimalism pastel classic page has language metadata, demo stats, and
+// sample code snippets for the empty-state preview.
 
 export interface Language {
   id: string;
@@ -17,26 +17,26 @@ export interface Stat {
   color: string;
 }
 
-// 8 supported languages — each gets its own pastel chip color and emoji
+// 8 supported languages — each gets its own soft pastel chip color and emoji
 // used in the language picker and the "Terdeteksi" panel after extraction.
 export const LANGUAGES: Language[] = [
-  { id: "python",     label: "Python",     emoji: "🐍", color: "#d4f0e4", ext: "py"  },
-  { id: "r",          label: "R Code",     emoji: "📊", color: "#f5f0ff", ext: "R"   },
-  { id: "javascript", label: "JavaScript", emoji: "⚡", color: "#ffe8a3", ext: "js"  },
-  { id: "typescript", label: "TypeScript", emoji: "🔷", color: "#ffe0d0", ext: "ts"  },
-  { id: "java",       label: "Java",       emoji: "☕", color: "#ffd6e0", ext: "java" },
-  { id: "cpp",        label: "C++",        emoji: "⚙️",  color: "#d0f0ff", ext: "cpp" },
-  { id: "sql",        label: "SQL",        emoji: "🗃️", color: "#e8d4f0", ext: "sql" },
+  { id: "python",     label: "Python",     emoji: "🐍", color: "#e8f0e4", ext: "py"  },
+  { id: "r",          label: "R Code",     emoji: "📊", color: "#e4e0f0", ext: "R"   },
+  { id: "javascript", label: "JavaScript", emoji: "⚡", color: "#f0ead4", ext: "js"  },
+  { id: "typescript", label: "TypeScript", emoji: "🔷", color: "#e0e8f0", ext: "ts"  },
+  { id: "java",       label: "Java",       emoji: "☕", color: "#f0d4d8", ext: "java" },
+  { id: "cpp",        label: "C++",        emoji: "⚙️",  color: "#d4e8f0", ext: "cpp" },
+  { id: "sql",        label: "SQL",        emoji: "🗃️", color: "#e8d4e8", ext: "sql" },
   { id: "kotlin",     label: "Kotlin",     emoji: "🟣", color: "#d4f0e4", ext: "kt"  },
 ];
 
-// Hero stats grid — purely decorative numbers that give the page its bold
-// comic-book hero feel. Not backed by real data.
+// Hero stats grid — purely decorative numbers that give the page its refined
+// minimalism pastel classic feel. Not backed by real data.
 export const STATS: Stat[] = [
-  { label: "File Diproses",   val: "1,247", color: "#d4f0e4" },
-  { label: "Kode Diekstrak",  val: "8,903", color: "#ffe8a3" },
-  { label: "Bahasa Didukung", val: "8",     color: "#f5f0ff" },
-  { label: "Akurasi",         val: "97.2%", color: "#ffe0d0" },
+  { label: "File Diproses",   val: "1,247", color: "#e8f0e4" },
+  { label: "Kode Diekstrak",  val: "8,903", color: "#f0ead4" },
+  { label: "Bahasa Didukung", val: "8",     color: "#e4e0f0" },
+  { label: "Akurasi",         val: "97.2%", color: "#f0d4d8" },
 ];
 
 // Sample codes for the empty-state preview in the result panel — keeps the

@@ -1,6 +1,6 @@
 "use client";
 
-// CodeLooter — main page (neo-brutalist redesign).
+// CodeLooter — main page (minimalism pastel classic redesign).
 //
 // Adapted from the original CodeLooter repo's app/page.tsx:
 //   - Removed auth/user profile (no login in our single-user sandbox).
@@ -43,13 +43,14 @@ import {
 const ACCEPTED_EXT = /\.(pdf|doc|docx|pptx?|xlsx?|txt|md|html|ipynb|tex)$/i;
 
 // ─── Reusable presentational primitives ───
-// All neo-brutalist styling is inline (3px black borders, hard shadows,
-// bright pastel colors) so the visual language matches the original repo
-// exactly. No Tailwind classes for these elements.
+// All minimalism pastel classic styling is inline (1px borders, soft
+// diffused shadows, muted pastel colors, refined typography) so the
+// visual language stays consistent throughout the page. No Tailwind
+// classes for these elements.
 
 function Tag({
-  bg = "#ffe8a3",
-  color = "#000",
+  bg = "#f0ead4",
+  color = "#3a3a3a",
   children,
 }: {
   bg?: string;
@@ -61,11 +62,12 @@ function Tag({
       style={{
         backgroundColor: bg,
         color,
-        border: "2px solid #000",
+        border: "1px solid rgba(0,0,0,0.06)",
         borderRadius: "6px",
         padding: "2px 9px",
         fontSize: "0.68rem",
-        fontWeight: 900,
+        fontWeight: 500,
+        letterSpacing: "0.01em",
         whiteSpace: "nowrap",
         fontFamily: "var(--font-body)",
       }}
@@ -86,12 +88,13 @@ function Card({
     <div
       style={{
         backgroundColor: "#fff",
-        border: "3px solid #000",
-        borderRadius: "16px",
-        boxShadow: "5px 5px 0 #000",
+        border: "1px solid rgba(0,0,0,0.06)",
+        borderRadius: "14px",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
+        transition: "box-shadow 0.2s ease, transform 0.2s ease",
         ...style,
       }}
     >
@@ -111,11 +114,11 @@ function CardHeader({
     <div
       style={{
         backgroundColor: bg,
-        borderBottom: "3px solid #000",
-        padding: "11px 16px",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
+        padding: "14px 18px",
         display: "flex",
         alignItems: "center",
-        gap: "8px",
+        gap: "10px",
         flexShrink: 0,
       }}
     >
@@ -142,19 +145,20 @@ function LangChip({
       onClick={onClick}
       style={{
         backgroundColor: active ? lang.color : "#fff",
-        border: "2px solid #000",
+        border: active
+          ? "1px solid rgba(0,0,0,0.14)"
+          : "1px solid rgba(0,0,0,0.08)",
         borderRadius: "8px",
-        padding: "4px 10px",
+        padding: "5px 11px",
         fontSize: "0.75rem",
-        fontWeight: 900,
+        fontWeight: 500,
+        color: "#3a3a3a",
         cursor: "pointer",
-        boxShadow: active ? "2px 2px 0 #000" : "none",
-        transform: active ? "translate(1px,1px)" : "",
         fontFamily: "var(--font-body)",
         display: "flex",
         alignItems: "center",
-        gap: "4px",
-        transition: "all 0.1s",
+        gap: "5px",
+        transition: "all 0.2s ease",
       }}
     >
       <span>{lang.emoji}</span>
@@ -414,8 +418,9 @@ export default function Home() {
   return (
     <div
       style={{
-        backgroundColor: "#fef9f0",
+        backgroundColor: "#faf9f6",
         fontFamily: "var(--font-body)",
+        color: "#3a3a3a",
         minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
@@ -424,24 +429,24 @@ export default function Home() {
       {/* ══ HEADER ══ */}
       <header
         style={{
-          backgroundColor: "#ffe8a3",
-          borderBottom: "3px solid #000",
-          boxShadow: "0 5px 0 #000",
+          backgroundColor: "rgba(255,255,255,0.85)",
+          backdropFilter: "blur(8px)",
+          borderBottom: "1px solid rgba(0,0,0,0.06)",
           position: "sticky",
           top: 0,
           zIndex: 50,
-          padding: "8px 16px",
+          padding: "12px 20px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: "8px",
+          gap: "12px",
         }}
       >
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "10px",
+            gap: "12px",
             minWidth: 0,
           }}
         >
@@ -449,90 +454,84 @@ export default function Home() {
             style={{
               width: 40,
               height: 40,
-              border: "3px solid #000",
+              border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: "10px",
-              backgroundColor: "#ff6b6b",
-              boxShadow: "3px 3px 0 #000",
+              backgroundColor: "#c9a0a0",
+              boxShadow: "0 2px 8px rgba(201,160,160,0.25)",
               flexShrink: 0,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              color: "#fff",
             }}
           >
-            <Code2 size={22} strokeWidth={2.5} />
+            <Code2 size={22} strokeWidth={2} />
           </div>
           <h1
             style={{
               fontFamily: "var(--font-display)",
               fontSize: "clamp(1.5rem,5vw,2.1rem)",
-              letterSpacing: "0.05em",
+              letterSpacing: "0.01em",
+              fontWeight: 600,
               lineHeight: 1,
-              textShadow: "3px 3px 0 #ff6b6b",
+              color: "#3a3a3a",
               whiteSpace: "nowrap",
               margin: 0,
             }}
           >
             CodeLooter!
           </h1>
-          <div
+          <span
             style={{
-              backgroundColor: "#ff6b6b",
-              border: "2px solid #000",
-              borderRadius: "6px",
-              padding: "1px 7px",
-              fontFamily: "var(--font-display)",
-              fontSize: "0.78rem",
-              color: "#fff",
-              boxShadow: "2px 2px 0 #000",
+              backgroundColor: "#f0d4d8",
+              color: "#7a4a52",
+              border: "1px solid rgba(122,74,82,0.18)",
+              borderRadius: "999px",
+              padding: "3px 10px",
+              fontFamily: "var(--font-body)",
+              fontSize: "0.66rem",
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
               flexShrink: 0,
             }}
           >
-            BETA
-          </div>
+            Beta
+          </span>
         </div>
 
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "8px",
+            gap: "10px",
             flexShrink: 0,
           }}
         >
           {extractMeta.method && (
-            <Tag bg="#d4f0e4" color="#000">⚡ PATTERN</Tag>
+            <Tag bg="#e8f0e4" color="#4a6a4a">⚡ Pattern</Tag>
           )}
           <button
             onClick={() => fileInputRef.current?.click()}
+            className="cl-btn"
             style={{
-              backgroundColor: "#000",
-              color: "#ffe8a3",
-              border: "3px solid #000",
+              backgroundColor: "#3a3a3a",
+              color: "#faf9f6",
+              border: "1px solid #3a3a3a",
               borderRadius: "10px",
-              padding: "8px 14px",
-              fontFamily: "var(--font-display)",
-              fontSize: "0.95rem",
-              letterSpacing: "0.05em",
+              padding: "9px 16px",
+              fontFamily: "var(--font-body)",
+              fontSize: "0.88rem",
+              fontWeight: 500,
+              letterSpacing: "0.01em",
               cursor: "pointer",
-              boxShadow: "4px 4px 0 #ff6b6b",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
               display: "flex",
               alignItems: "center",
               gap: "6px",
-              transition: "transform 0.1s, box-shadow 0.1s",
-            }}
-            onMouseDown={(e) => {
-              (e.currentTarget as HTMLElement).style.transform =
-                "translate(2px,2px)";
-              (e.currentTarget as HTMLElement).style.boxShadow =
-                "2px 2px 0 #ff6b6b";
-            }}
-            onMouseUp={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = "";
-              (e.currentTarget as HTMLElement).style.boxShadow =
-                "4px 4px 0 #ff6b6b";
             }}
           >
-            <Upload size={15} /> PILIH FILE
+            <Upload size={15} /> Pilih File
           </button>
         </div>
       </header>
@@ -540,7 +539,7 @@ export default function Home() {
       {/* ══ MAIN ══ */}
       <main
         style={{
-          padding: "16px",
+          padding: "24px 20px",
           maxWidth: "1400px",
           margin: "0 auto",
           width: "100%",
@@ -553,19 +552,34 @@ export default function Home() {
             <div
               key={s.label}
               style={{
-                backgroundColor: s.color,
-                border: "3px solid #000",
-                borderRadius: "10px",
-                padding: "10px 14px",
-                boxShadow: "4px 4px 0 #000",
+                backgroundColor: "#fff",
+                border: "1px solid rgba(0,0,0,0.06)",
+                borderRadius: "12px",
+                padding: "16px 18px",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
+                transition: "box-shadow 0.2s ease, transform 0.2s ease",
+                position: "relative",
+                overflow: "hidden",
               }}
             >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  backgroundColor: s.color,
+                }}
+              />
               <p
                 style={{
-                  fontSize: "clamp(1.2rem,4vw,1.6rem)",
+                  fontSize: "clamp(1.4rem,4vw,1.8rem)",
                   fontFamily: "var(--font-display)",
-                  letterSpacing: "0.04em",
-                  lineHeight: 1,
+                  fontWeight: 600,
+                  letterSpacing: "0.01em",
+                  lineHeight: 1.1,
+                  color: "#3a3a3a",
                   margin: 0,
                 }}
               >
@@ -573,12 +587,13 @@ export default function Home() {
               </p>
               <p
                 style={{
-                  fontSize: "0.7rem",
-                  fontWeight: 800,
-                  color: "#333",
-                  marginTop: "2px",
+                  fontSize: "0.72rem",
+                  fontWeight: 500,
+                  color: "#8a8a8a",
+                  marginTop: "4px",
                   marginBottom: 0,
                   fontFamily: "var(--font-body)",
+                  letterSpacing: "0.02em",
                 }}
               >
                 {s.label}
@@ -591,24 +606,26 @@ export default function Home() {
         <div className="main-grid">
           {/* COL 1: PILIH BAHASA */}
           <Card>
-            <CardHeader bg="#ffe8a3">
-              <Code2 size={15} />
+            <CardHeader bg="#faf7f2">
+              <Code2 size={15} color="#8a8a8a" />
               <span
                 style={{
                   fontFamily: "var(--font-display)",
-                  fontSize: "1.1rem",
-                  letterSpacing: "0.05em",
+                  fontSize: "1.05rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.01em",
+                  color: "#3a3a3a",
                 }}
               >
-                PILIH BAHASA
+                Pilih Bahasa
               </span>
             </CardHeader>
             <div
               style={{
-                padding: "14px",
+                padding: "18px",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
+                gap: "12px",
                 flex: 1,
                 overflow: "hidden",
               }}
@@ -617,20 +634,21 @@ export default function Home() {
               {detectedLangs.length > 0 && (
                 <div
                   style={{
-                    backgroundColor: "#d4f0e4",
-                    border: "2px solid #000",
+                    backgroundColor: "#e8f0e4",
+                    border: "1px solid rgba(0,0,0,0.06)",
                     borderRadius: "10px",
-                    padding: "10px 12px",
+                    padding: "12px 14px",
                   }}
                 >
                   <p
                     style={{
-                      fontSize: "0.65rem",
-                      fontWeight: 900,
+                      fontSize: "0.64rem",
+                      fontWeight: 600,
                       textTransform: "uppercase",
                       letterSpacing: "0.08em",
-                      marginBottom: "7px",
+                      marginBottom: "8px",
                       marginTop: 0,
+                      color: "#4a6a4a",
                     }}
                   >
                     🔍 Terdeteksi
@@ -639,7 +657,7 @@ export default function Home() {
                     style={{
                       display: "flex",
                       flexWrap: "wrap",
-                      gap: "5px",
+                      gap: "6px",
                     }}
                   >
                     {detectedLangs.map((id) => {
@@ -653,7 +671,7 @@ export default function Home() {
                               id,
                               label: id,
                               emoji: "📄",
-                              color: "#ffe8a3",
+                              color: "#f0ead4",
                             }
                           }
                           active={isActive}
@@ -670,13 +688,13 @@ export default function Home() {
                 {detectedLangs.length > 0 && (
                   <p
                     style={{
-                      fontSize: "0.65rem",
-                      fontWeight: 900,
+                      fontSize: "0.64rem",
+                      fontWeight: 600,
                       textTransform: "uppercase",
                       letterSpacing: "0.08em",
                       marginBottom: "6px",
                       marginTop: 0,
-                      color: "#555",
+                      color: "#8a8a8a",
                     }}
                   >
                     Override manual
@@ -684,19 +702,21 @@ export default function Home() {
                 )}
                 <button
                   onClick={() => setDropdownOpen(!dropdownOpen)}
+                  className="cl-btn"
                   style={{
                     width: "100%",
-                    backgroundColor: currentLang?.color ?? "#ffe8a3",
-                    border: "3px solid #000",
+                    backgroundColor: "#fff",
+                    border: "1px solid rgba(0,0,0,0.08)",
                     borderRadius: "10px",
-                    padding: "10px 14px",
+                    padding: "11px 14px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                     cursor: "pointer",
-                    boxShadow: "4px 4px 0 #000",
-                    fontWeight: 900,
-                    fontSize: "0.95rem",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                    fontWeight: 500,
+                    fontSize: "0.9rem",
+                    color: "#3a3a3a",
                     fontFamily: "var(--font-body)",
                   }}
                 >
@@ -707,13 +727,25 @@ export default function Home() {
                       gap: "8px",
                     }}
                   >
-                    <span style={{ fontSize: "1.2rem" }}>
+                    <span
+                      style={{
+                        fontSize: "1.05rem",
+                        width: 22,
+                        height: 22,
+                        borderRadius: "6px",
+                        backgroundColor: currentLang?.color ?? "#f0ead4",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
                       {currentLang?.emoji}
                     </span>
                     {currentLang?.label}
                   </span>
                   <ChevronDown
                     size={16}
+                    color="#8a8a8a"
                     style={{
                       transform: dropdownOpen ? "rotate(180deg)" : "",
                       transition: "transform 0.2s",
@@ -725,16 +757,16 @@ export default function Home() {
                   <div
                     style={{
                       position: "absolute",
-                      top: "calc(100% + 4px)",
+                      top: "calc(100% + 6px)",
                       left: 0,
                       right: 0,
                       backgroundColor: "#fff",
-                      border: "3px solid #000",
+                      border: "1px solid rgba(0,0,0,0.08)",
                       borderRadius: "10px",
-                      boxShadow: "5px 5px 0 #000",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
                       zIndex: 30,
                       overflow: "hidden",
-                      animation: "popIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",
+                      animation: "fadeIn 0.2s ease",
                     }}
                   >
                     {LANGUAGES.map((lang, idx) => (
@@ -746,35 +778,36 @@ export default function Home() {
                         }}
                         style={{
                           width: "100%",
-                          padding: "9px 14px",
+                          padding: "10px 14px",
                           backgroundColor:
                             lang.id === selectedLang ? lang.color : "#fff",
                           border: "none",
                           borderBottom:
                             idx < LANGUAGES.length - 1
-                              ? "2px solid #eee"
+                              ? "1px solid rgba(0,0,0,0.04)"
                               : "none",
                           textAlign: "left",
                           cursor: "pointer",
                           display: "flex",
                           alignItems: "center",
                           gap: "8px",
-                          fontWeight: 800,
-                          fontSize: "0.88rem",
+                          fontWeight: 500,
+                          fontSize: "0.85rem",
+                          color: "#3a3a3a",
                           fontFamily: "var(--font-body)",
-                          transition: "background-color 0.1s",
+                          transition: "background-color 0.15s ease",
                         }}
                         onMouseEnter={(e) => {
                           if (lang.id !== selectedLang)
                             (e.currentTarget as HTMLElement).style.backgroundColor =
-                              "#fef9f0";
+                              "#faf9f6";
                         }}
                         onMouseLeave={(e) => {
                           (e.currentTarget as HTMLElement).style.backgroundColor =
                             lang.id === selectedLang ? lang.color : "#fff";
                         }}
                       >
-                        <span>{lang.emoji}</span>
+                        <span style={{ fontSize: "1.05rem" }}>{lang.emoji}</span>
                         {lang.label}
                       </button>
                     ))}
@@ -785,18 +818,20 @@ export default function Home() {
               {/* info */}
               <div
                 style={{
-                  backgroundColor: currentLang?.color ?? "#ffe8a3",
-                  border: "2px solid #000",
+                  backgroundColor: currentLang?.color ?? "#f0ead4",
+                  border: "1px solid rgba(0,0,0,0.06)",
                   borderRadius: "10px",
-                  padding: "12px",
+                  padding: "14px",
                 }}
               >
                 <p
                   style={{
                     fontFamily: "var(--font-display)",
-                    fontSize: "1.25rem",
-                    letterSpacing: "0.04em",
-                    lineHeight: 1,
+                    fontSize: "1.15rem",
+                    fontWeight: 600,
+                    letterSpacing: "0.01em",
+                    lineHeight: 1.2,
+                    color: "#3a3a3a",
                     margin: 0,
                   }}
                 >
@@ -804,10 +839,10 @@ export default function Home() {
                 </p>
                 <p
                   style={{
-                    fontSize: "0.75rem",
-                    fontWeight: 700,
-                    color: "#444",
-                    marginTop: "4px",
+                    fontSize: "0.74rem",
+                    fontWeight: 400,
+                    color: "#6a6a6a",
+                    marginTop: "5px",
                     marginBottom: 0,
                   }}
                 >
@@ -817,8 +852,8 @@ export default function Home() {
 
               <div
                 style={{
-                  backgroundColor: "#fef9f0",
-                  border: "2px dashed #000",
+                  backgroundColor: "#faf9f6",
+                  border: "1px dashed rgba(0,0,0,0.14)",
                   borderRadius: "8px",
                   padding: "10px 12px",
                   marginTop: "auto",
@@ -827,8 +862,8 @@ export default function Home() {
                 <p
                   style={{
                     fontSize: "0.72rem",
-                    fontWeight: 800,
-                    color: "#555",
+                    fontWeight: 400,
+                    color: "#6a6a6a",
                     lineHeight: 1.5,
                     margin: 0,
                   }}
@@ -843,27 +878,30 @@ export default function Home() {
 
           {/* COL 2: UPLOAD FILE */}
           <Card>
-            <CardHeader bg="#d4f0e4">
-              <FileText size={15} />
+            <CardHeader bg="#f5f8f3">
+              <FileText size={15} color="#8a8a8a" />
               <span
                 style={{
                   fontFamily: "var(--font-display)",
-                  fontSize: "1.1rem",
-                  letterSpacing: "0.05em",
+                  fontSize: "1.05rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.01em",
+                  color: "#3a3a3a",
                 }}
               >
-                UPLOAD FILE
+                Upload File
               </span>
-              <Tag bg="#000" color="#d4f0e4">
+              <Tag bg="#e8f0e4" color="#4a6a4a">
                 PDF · DOC · PPTX
               </Tag>
             </CardHeader>
             <div
               style={{
-                padding: "14px",
+                padding: "18px",
                 display: "flex",
                 flexDirection: "column",
                 flex: 1,
+                gap: "14px",
               }}
             >
               {/* drop zone */}
@@ -887,11 +925,11 @@ export default function Home() {
                     fileInputRef.current?.click();
                 }}
                 style={{
-                  backgroundColor: isDragging ? "#b8e8d0" : "#fef9f0",
-                  border: "3px dashed #000",
+                  backgroundColor: isDragging ? "#e8f0e4" : "#faf9f6",
+                  border: `2px dashed ${isDragging ? "#a3b8a0" : "rgba(0,0,0,0.14)"}`,
                   borderRadius: "12px",
                   cursor: uploadedFile ? "default" : "pointer",
-                  transition: "background-color 0.15s",
+                  transition: "all 0.2s ease",
                   position: "relative",
                   flex: 1,
                   display: "flex",
@@ -899,63 +937,47 @@ export default function Home() {
                   alignItems: "center",
                   justifyContent: "center",
                   gap: "14px",
-                  padding: "24px 16px",
-                  minHeight: "200px",
+                  padding: "28px 18px",
+                  minHeight: "220px",
                 }}
               >
-                {/* corner decorations */}
-                {(["tl", "tr", "bl", "br"] as const).map((c) => (
-                  <div
-                    key={c}
-                    style={{
-                      position: "absolute",
-                      width: 14,
-                      height: 14,
-                      backgroundColor: "#ffe8a3",
-                      border: "2px solid #000",
-                      borderRadius: "3px",
-                      top: c[0] === "t" ? -3 : undefined,
-                      bottom: c[0] === "b" ? -3 : undefined,
-                      left: c[1] === "l" ? -3 : undefined,
-                      right: c[1] === "r" ? -3 : undefined,
-                    }}
-                  />
-                ))}
-
                 {!uploadedFile ? (
                   <>
                     <div
                       style={{
-                        backgroundColor: "#f5f0ff",
-                        border: "3px solid #000",
+                        backgroundColor: "#fff",
+                        border: "1px solid rgba(0,0,0,0.06)",
                         borderRadius: "50%",
                         width: "clamp(72px,12vw,96px)",
                         height: "clamp(72px,12vw,96px)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        boxShadow: "5px 5px 0 #000",
+                        boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+                        color: "#c9a0a0",
                       }}
                     >
-                      <Upload size={36} strokeWidth={2.5} />
+                      <Upload size={32} strokeWidth={1.75} />
                     </div>
                     <div style={{ textAlign: "center" }}>
                       <p
                         style={{
                           fontFamily: "var(--font-display)",
-                          fontSize: "clamp(1.1rem,3vw,1.55rem)",
-                          letterSpacing: "0.04em",
+                          fontSize: "clamp(1.1rem,3vw,1.4rem)",
+                          fontWeight: 600,
+                          letterSpacing: "0.01em",
                           lineHeight: 1.25,
                           margin: 0,
+                          color: "#3a3a3a",
                         }}
                       >
-                        Jatuhkan dokumenmu di sini!
+                        Jatuhkan dokumenmu di sini
                       </p>
                       <p
                         style={{
-                          fontSize: "0.82rem",
-                          fontWeight: 700,
-                          color: "#555",
+                          fontSize: "0.8rem",
+                          fontWeight: 400,
+                          color: "#8a8a8a",
                           marginTop: "5px",
                           marginBottom: 0,
                         }}
@@ -965,12 +987,14 @@ export default function Home() {
                     </div>
                     <div
                       style={{
-                        backgroundColor: "#ffe8a3",
-                        border: "2px solid #000",
+                        backgroundColor: "#f0ead4",
+                        border: "1px solid rgba(0,0,0,0.06)",
                         borderRadius: "8px",
-                        padding: "5px 16px",
-                        fontSize: "0.75rem",
-                        fontWeight: 800,
+                        padding: "5px 14px",
+                        fontSize: "0.72rem",
+                        fontWeight: 500,
+                        color: "#5a5a3a",
+                        fontFamily: "var(--font-body)",
                       }}
                     >
                       Maks. 50MB · PDF, MD, IPYNB, TXT, TEX, HTML
@@ -980,37 +1004,39 @@ export default function Home() {
                   <>
                     <div
                       style={{
-                        backgroundColor: "#d4f0e4",
-                        border: "3px solid #000",
+                        backgroundColor: "#fff",
+                        border: "1px solid rgba(0,0,0,0.08)",
                         borderRadius: "10px",
-                        padding: "14px 18px",
-                        width: "90%",
-                        maxWidth: 360,
+                        padding: "14px 16px",
+                        width: "92%",
+                        maxWidth: 380,
                         display: "flex",
                         alignItems: "center",
-                        gap: "10px",
-                        boxShadow: "3px 3px 0 #000",
+                        gap: "12px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
                       }}
                     >
                       <div
                         style={{
-                          backgroundColor: "#000",
+                          backgroundColor: "#3a3a3a",
                           borderRadius: "8px",
                           padding: "8px",
                           flexShrink: 0,
+                          color: "#faf9f6",
                         }}
                       >
-                        <FileText size={20} color="#d4f0e4" />
+                        <FileText size={20} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p
                           style={{
-                            fontWeight: 900,
-                            fontSize: "0.88rem",
+                            fontWeight: 600,
+                            fontSize: "0.86rem",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                             margin: 0,
+                            color: "#3a3a3a",
                           }}
                         >
                           {uploadedFile.name}
@@ -1018,8 +1044,8 @@ export default function Home() {
                         <p
                           style={{
                             fontSize: "0.72rem",
-                            fontWeight: 700,
-                            color: "#444",
+                            fontWeight: 400,
+                            color: "#8a8a8a",
                             margin: 0,
                           }}
                         >
@@ -1032,28 +1058,43 @@ export default function Home() {
                           setFile(null);
                         }}
                         style={{
-                          backgroundColor: "#ff6b6b",
-                          border: "2px solid #000",
+                          backgroundColor: "transparent",
+                          border: "1px solid rgba(0,0,0,0.1)",
                           borderRadius: "6px",
                           padding: "5px",
                           cursor: "pointer",
                           flexShrink: 0,
                           display: "flex",
+                          color: "#8a8a8a",
+                          transition: "all 0.2s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor =
+                            "#c9646a";
+                          (e.currentTarget as HTMLElement).style.color =
+                            "#c9646a";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor =
+                            "rgba(0,0,0,0.1)";
+                          (e.currentTarget as HTMLElement).style.color =
+                            "#8a8a8a";
                         }}
                       >
-                        <X size={14} color="#fff" />
+                        <X size={14} />
                       </button>
                     </div>
                     <p
                       style={{
-                        fontFamily: "var(--font-display)",
-                        fontSize: "1.1rem",
-                        color: "#009944",
-                        letterSpacing: "0.03em",
+                        fontFamily: "var(--font-body)",
+                        fontSize: "0.86rem",
+                        color: "#6a8a5a",
+                        fontWeight: 500,
+                        letterSpacing: "0.01em",
                         margin: 0,
                       }}
                     >
-                      ✅ File siap diekstrak!
+                      ✅ File siap diekstrak
                     </p>
                   </>
                 )}
@@ -1069,63 +1110,54 @@ export default function Home() {
               <button
                 onClick={handleExtract}
                 disabled={!uploadedFile || isExtracting}
+                className="cl-btn"
                 style={{
-                  marginTop: "12px",
                   width: "100%",
-                  backgroundColor: uploadedFile ? "#000" : "#ccc",
-                  color: uploadedFile ? "#ffe8a3" : "#888",
-                  border: "3px solid #000",
+                  backgroundColor:
+                    uploadedFile && !isExtracting ? "#c9a0a0" : "#e4e2de",
+                  color: uploadedFile ? "#ffffff" : "#a8a8a8",
+                  border: "1px solid transparent",
                   borderRadius: "10px",
-                  padding: "14px",
-                  fontFamily: "var(--font-display)",
-                  fontSize: "clamp(1rem,3vw,1.35rem)",
-                  letterSpacing: "0.06em",
+                  padding: "13px",
+                  fontFamily: "var(--font-body)",
+                  fontSize: "clamp(0.95rem,3vw,1.1rem)",
+                  fontWeight: 600,
+                  letterSpacing: "0.02em",
                   cursor:
                     uploadedFile && !isExtracting ? "pointer" : "not-allowed",
-                  boxShadow: uploadedFile ? "5px 5px 0 #ff6b6b" : "none",
-                  transition: "transform 0.1s, box-shadow 0.1s",
+                  boxShadow: uploadedFile
+                    ? "0 4px 14px rgba(201,160,160,0.3)"
+                    : "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   gap: "8px",
                   flexShrink: 0,
-                }}
-                onMouseDown={(e) => {
-                  if (uploadedFile) {
-                    (e.currentTarget as HTMLElement).style.transform =
-                      "translate(3px,3px)";
-                    (e.currentTarget as HTMLElement).style.boxShadow =
-                      "2px 2px 0 #ff6b6b";
-                  }
-                }}
-                onMouseUp={(e) => {
-                  (e.currentTarget as HTMLElement).style.transform = "";
-                  (e.currentTarget as HTMLElement).style.boxShadow = uploadedFile
-                    ? "5px 5px 0 #ff6b6b"
-                    : "none";
+                  transition: "all 0.2s ease",
                 }}
               >
                 {isExtracting ? (
                   <>
                     <div
                       style={{
-                        width: 20,
-                        height: 20,
-                        border: "3px solid #ffe8a3",
-                        borderTopColor: "transparent",
+                        width: 18,
+                        height: 18,
+                        border: "2px solid rgba(255,255,255,0.5)",
+                        borderTopColor: "#fff",
                         borderRadius: "50%",
                         animation: "spin 0.7s linear infinite",
                       }}
                     />
-                    SEDANG MENGEKSTRAK...
+                    Sedang mengekstrak...
                   </>
                 ) : (
                   <>
                     <Zap
-                      size={22}
-                      fill={uploadedFile ? "#ffe8a3" : "#888"}
+                      size={20}
+                      fill={uploadedFile ? "#ffffff" : "#a8a8a8"}
+                      strokeWidth={1.5}
                     />
-                    {extracted ? "EKSTRAK ULANG!" : "EKSTRAK KODE!"}
+                    {extracted ? "Ekstrak Ulang" : "Ekstrak Kode"}
                   </>
                 )}
               </button>
@@ -1134,17 +1166,16 @@ export default function Home() {
 
           {/* COL 3: HASIL EKSTRAKSI */}
           <Card>
-            <CardHeader bg="#f5f0ff">
+            <CardHeader bg="#f6f5fb">
               <div style={{ display: "flex", gap: "5px" }}>
-                {["#ff6b6b", "#ffe8a3", "#d4f0e4"].map((c) => (
+                {["#c9a0a0", "#d4d0e8", "#c8d8c0"].map((c) => (
                   <div
                     key={c}
                     style={{
-                      width: 11,
-                      height: 11,
+                      width: 10,
+                      height: 10,
                       borderRadius: "50%",
                       backgroundColor: c,
-                      border: "2px solid #000",
                     }}
                   />
                 ))}
@@ -1152,28 +1183,36 @@ export default function Home() {
               <span
                 style={{
                   fontFamily: "var(--font-display)",
-                  fontSize: "1.1rem",
-                  letterSpacing: "0.05em",
+                  fontSize: "1.05rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.01em",
+                  color: "#3a3a3a",
                   flex: 1,
                 }}
               >
-                HASIL EKSTRAKSI
+                Hasil Ekstraksi
               </span>
               <div
                 style={{
                   backgroundColor: extracted
-                    ? "#d4f0e4"
+                    ? "#e8f0e4"
                     : extractError
-                      ? "#ffd6d6"
-                      : "#ffe8a3",
-                  border: "2px solid #000",
-                  borderRadius: "8px",
-                  padding: "2px 9px",
-                  fontSize: "0.68rem",
-                  fontWeight: 900,
+                      ? "#f0d4d8"
+                      : "#f0ead4",
+                  border: "1px solid rgba(0,0,0,0.06)",
+                  borderRadius: "999px",
+                  padding: "3px 10px",
+                  fontSize: "0.66rem",
+                  fontWeight: 500,
+                  letterSpacing: "0.02em",
                   display: "flex",
                   alignItems: "center",
-                  gap: "4px",
+                  gap: "5px",
+                  color: extracted
+                    ? "#4a6a4a"
+                    : extractError
+                      ? "#7a4a52"
+                      : "#7a6a3a",
                   fontFamily: "var(--font-body)",
                 }}
               >
@@ -1183,18 +1222,18 @@ export default function Home() {
                     height: 6,
                     borderRadius: "50%",
                     backgroundColor: extracted
-                      ? "#00aa44"
+                      ? "#6a9a5a"
                       : extractError
-                        ? "#ff4444"
-                        : "#ffaa00",
+                        ? "#c9646a"
+                        : "#c9a85a",
                     display: "inline-block",
                   }}
                 />
                 {extracted
-                  ? `${extractedBlocks.length} BLOK`
+                  ? `${extractedBlocks.length} blok`
                   : extractError
-                    ? "GAGAL"
-                    : "MENUNGGU"}
+                    ? "Gagal"
+                    : "Menunggu"}
               </div>
             </CardHeader>
 
@@ -1202,12 +1241,12 @@ export default function Home() {
             {detectedLangs.length > 1 && (
               <div
                 style={{
-                  backgroundColor: "#fef9f0",
-                  borderBottom: "2px solid #000",
-                  padding: "8px 12px",
+                  backgroundColor: "#faf9f6",
+                  borderBottom: "1px solid rgba(0,0,0,0.06)",
+                  padding: "10px 14px",
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: "5px",
+                  gap: "6px",
                 }}
               >
                 {detectedLangs.map((id) => {
@@ -1220,7 +1259,7 @@ export default function Home() {
                           id,
                           label: id,
                           emoji: "📄",
-                          color: "#ffe8a3",
+                          color: "#f0ead4",
                         }
                       }
                       active={id === selectedLang}
@@ -1234,15 +1273,16 @@ export default function Home() {
             <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
               <div
                 style={{
-                  backgroundColor: "#1a1a2e",
+                  backgroundColor: "#2a2826",
                   height: "100%",
                   overflowY: "auto",
-                  padding: "18px",
+                  padding: "20px",
                   fontFamily: "var(--font-mono)",
                   fontSize: "0.78rem",
                   lineHeight: 1.7,
                   minHeight: "240px",
                   maxHeight: "440px",
+                  color: "#e8e4dc",
                 }}
               >
                 {!extracted && !isExtracting && !extractError && (
@@ -1260,23 +1300,26 @@ export default function Home() {
                     <p
                       style={{
                         fontFamily: "var(--font-display)",
-                        fontSize: "3rem",
-                        color: "#aaa",
+                        fontSize: "2.6rem",
+                        color: "#8a8a8a",
                         margin: 0,
+                        fontWeight: 500,
                       }}
                     >
                       ???
                     </p>
                     <p
                       style={{
-                        color: "#888",
-                        fontWeight: 700,
+                        color: "#a8a8a8",
+                        fontWeight: 400,
                         textAlign: "center",
-                        fontSize: "0.85rem",
+                        fontSize: "0.82rem",
                         margin: 0,
+                        letterSpacing: "0.01em",
                       }}
                     >
-                      Upload file &amp; klik EKSTRAK KODE! untuk memulai
+                      Upload file &amp; klik <strong>Ekstrak Kode</strong> untuk
+                      memulai
                     </p>
                   </div>
                 )}
@@ -1293,11 +1336,12 @@ export default function Home() {
                   >
                     <p
                       style={{
-                        fontFamily: "var(--font-display)",
-                        fontSize: "1.3rem",
-                        color: "#ff6b6b",
+                        fontFamily: "var(--font-body)",
+                        fontSize: "0.95rem",
+                        color: "#e8a0a0",
                         textAlign: "center",
                         margin: 0,
+                        fontWeight: 500,
                       }}
                     >
                       {extractError}
@@ -1317,27 +1361,28 @@ export default function Home() {
                   >
                     <p
                       style={{
-                        fontFamily: "var(--font-display)",
-                        fontSize: "1.8rem",
-                        color: "#ffe8a3",
-                        animation:
-                          "pulse 0.8s ease-in-out infinite alternate",
+                        fontFamily: "var(--font-body)",
+                        fontSize: "1rem",
+                        color: "#d4d0e8",
+                        animation: "pulse 0.9s ease-in-out infinite alternate",
                         margin: 0,
                         textAlign: "center",
+                        fontWeight: 500,
+                        letterSpacing: "0.02em",
                       }}
                     >
-                      MENGANALISIS FILE...
+                      Menganalisis file...
                     </p>
                     <div style={{ display: "flex", gap: "6px" }}>
                       {[0, 1, 2, 3, 4].map((i) => (
                         <div
                           key={i}
                           style={{
-                            width: 8,
-                            height: 8,
-                            backgroundColor: "#d4f0e4",
+                            width: 7,
+                            height: 7,
+                            backgroundColor: "#c8d8c0",
                             borderRadius: "50%",
-                            animation: `bounce 0.6s ease-in-out ${i * 0.1}s infinite alternate`,
+                            animation: `pulse 0.6s ease-in-out ${i * 0.1}s infinite alternate`,
                           }}
                         />
                       ))}
@@ -1352,7 +1397,7 @@ export default function Home() {
                         margin: 0,
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-word",
-                        color: "#e8f4fd",
+                        color: "#e8e4dc",
                       }}
                     >
                       <code>{extracted ? displayCode : ""}</code>
@@ -1367,14 +1412,16 @@ export default function Home() {
                     position: "absolute",
                     top: 14,
                     left: 14,
-                    backgroundColor: "rgba(0,0,0,0.6)",
-                    color: "#ffe8a3",
-                    border: "1px solid #ffe8a3",
+                    backgroundColor: "rgba(20,18,16,0.7)",
+                    color: "#d4d0e8",
+                    border: "1px solid rgba(212,208,232,0.2)",
                     borderRadius: "6px",
-                    padding: "2px 8px",
-                    fontSize: "0.65rem",
-                    fontWeight: 800,
+                    padding: "3px 9px",
+                    fontSize: "0.64rem",
+                    fontWeight: 500,
                     fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.01em",
+                    backdropFilter: "blur(6px)",
                     zIndex: 5,
                   }}
                 >
@@ -1404,38 +1451,44 @@ export default function Home() {
                     <button
                       onClick={handleSave}
                       title="Snippet ini sudah tersimpan — klik untuk simpan ulang"
+                      className="cl-btn"
                       style={{
-                        backgroundColor: "#d4f0e4",
-                        border: "3px solid #000",
+                        backgroundColor: "#e8f0e4",
+                        color: "#4a6a4a",
+                        border: "1px solid rgba(74,106,74,0.2)",
                         borderRadius: "999px",
-                        padding: "10px 14px",
-                        fontFamily: "var(--font-display)",
-                        fontSize: "0.9rem",
-                        letterSpacing: "0.05em",
+                        padding: "9px 14px",
+                        fontFamily: "var(--font-body)",
+                        fontSize: "0.82rem",
+                        fontWeight: 500,
+                        letterSpacing: "0.01em",
                         cursor: "pointer",
-                        boxShadow: "4px 4px 0 #000",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
                         display: "flex",
                         alignItems: "center",
                         gap: "5px",
                       }}
                     >
-                      <Check size={14} strokeWidth={3} /> Tersimpan! Simpan Ulang
+                      <Check size={14} strokeWidth={2.5} /> Tersimpan! Simpan Ulang
                     </button>
                   ) : (
                     <button
                       onClick={handleSave}
                       disabled={saving}
                       title="Simpan snippet"
+                      className="cl-btn"
                       style={{
-                        backgroundColor: "#f5f0ff",
-                        border: "3px solid #000",
+                        backgroundColor: "#fff",
+                        color: "#3a3a3a",
+                        border: "1px solid rgba(0,0,0,0.1)",
                         borderRadius: "999px",
-                        padding: "10px 14px",
-                        fontFamily: "var(--font-display)",
-                        fontSize: "0.9rem",
-                        letterSpacing: "0.05em",
+                        padding: "9px 14px",
+                        fontFamily: "var(--font-body)",
+                        fontSize: "0.82rem",
+                        fontWeight: 500,
+                        letterSpacing: "0.01em",
                         cursor: saving ? "not-allowed" : "pointer",
-                        boxShadow: "4px 4px 0 #000",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
                         display: "flex",
                         alignItems: "center",
                         gap: "5px",
@@ -1453,75 +1506,54 @@ export default function Home() {
                   )}
                   <button
                     onClick={handleDownload}
+                    className="cl-btn"
                     style={{
-                      backgroundColor: "#d4f0e4",
-                      border: "3px solid #000",
+                      backgroundColor: "#fff",
+                      color: "#4a6a5a",
+                      border: "1px solid rgba(74,106,90,0.2)",
                       borderRadius: "999px",
-                      padding: "10px 14px",
-                      fontFamily: "var(--font-display)",
-                      fontSize: "0.9rem",
-                      letterSpacing: "0.05em",
+                      padding: "9px 14px",
+                      fontFamily: "var(--font-body)",
+                      fontSize: "0.82rem",
+                      fontWeight: 500,
+                      letterSpacing: "0.01em",
                       cursor: "pointer",
-                      boxShadow: "4px 4px 0 #000",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
                       display: "flex",
                       alignItems: "center",
                       gap: "5px",
-                      transition: "all 0.15s",
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform =
-                        "translate(2px,2px)";
-                      (e.currentTarget as HTMLElement).style.boxShadow =
-                        "2px 2px 0 #000";
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform = "";
-                      (e.currentTarget as HTMLElement).style.boxShadow =
-                        "4px 4px 0 #000";
                     }}
                   >
                     ⬇ .{currentLang?.ext ?? "txt"}
                   </button>
                   <button
                     onClick={handleCopy}
+                    className="cl-btn"
                     style={{
-                      backgroundColor: copied ? "#d4f0e4" : "#ff6b6b",
-                      border: "3px solid #000",
+                      backgroundColor: copied ? "#e8f0e4" : "#fff",
+                      color: copied ? "#4a6a4a" : "#7a4a52",
+                      border: copied
+                        ? "1px solid rgba(74,106,74,0.2)"
+                        : "1px solid rgba(122,74,82,0.2)",
                       borderRadius: "999px",
-                      padding: "10px 18px",
-                      fontFamily: "var(--font-display)",
-                      fontSize: "0.9rem",
-                      letterSpacing: "0.06em",
+                      padding: "9px 16px",
+                      fontFamily: "var(--font-body)",
+                      fontSize: "0.82rem",
+                      fontWeight: 500,
+                      letterSpacing: "0.01em",
                       cursor: "pointer",
-                      boxShadow: copied ? "2px 2px 0 #000" : "5px 5px 0 #000",
-                      transform: copied ? "translate(3px,3px)" : "",
-                      transition: "all 0.15s",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
                       display: "flex",
                       alignItems: "center",
                       gap: "6px",
                     }}
-                    onMouseEnter={(e) => {
-                      if (!copied) {
-                        (e.currentTarget as HTMLElement).style.transform =
-                          "translate(2px,2px)";
-                        (e.currentTarget as HTMLElement).style.boxShadow =
-                          "3px 3px 0 #000";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!copied) {
-                        (e.currentTarget as HTMLElement).style.transform = "";
-                        (e.currentTarget as HTMLElement).style.boxShadow =
-                          "5px 5px 0 #000";
-                      }
-                    }}
                   >
                     {copied ? (
-                      <Check size={14} strokeWidth={3} />
+                      <Check size={14} strokeWidth={2.5} />
                     ) : (
                       <Copy size={14} />
                     )}
-                    {copied ? "TERSALIN!" : "BOOM! Salin Kode"}
+                    {copied ? "Tersalin" : "Salin Kode"}
                   </button>
                 </div>
               )}
@@ -1530,9 +1562,9 @@ export default function Home() {
             {extracted && activeBlock && (
               <div
                 style={{
-                  backgroundColor: "#ffe0d0",
-                  borderTop: "3px solid #000",
-                  padding: "7px 16px",
+                  backgroundColor: "#faf7f2",
+                  borderTop: "1px solid rgba(0,0,0,0.06)",
+                  padding: "9px 16px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
@@ -1540,15 +1572,21 @@ export default function Home() {
                   fontFamily: "var(--font-body)",
                 }}
               >
-                <span style={{ fontSize: "0.7rem", fontWeight: 900 }}>
+                <span
+                  style={{
+                    fontSize: "0.72rem",
+                    fontWeight: 500,
+                    color: "#5a5a5a",
+                  }}
+                >
                   {currentLang?.emoji} {currentLang?.label} ·{" "}
                   {activeBlock.lines} baris
                 </span>
                 <span
                   style={{
-                    fontSize: "0.7rem",
-                    fontWeight: 900,
-                    color: "#555",
+                    fontSize: "0.72rem",
+                    fontWeight: 400,
+                    color: "#8a8a8a",
                   }}
                 >
                   {new Date().toLocaleDateString("id-ID", {
@@ -1565,54 +1603,58 @@ export default function Home() {
         {/* ══ SNIPPET TERSIMPAN ══ */}
         <div
           style={{
-            marginTop: "16px",
+            marginTop: "20px",
             backgroundColor: "#fff",
-            border: "3px solid #000",
-            borderRadius: "16px",
-            boxShadow: "5px 5px 0 #000",
+            border: "1px solid rgba(0,0,0,0.06)",
+            borderRadius: "14px",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
             overflow: "hidden",
           }}
         >
           <div
             style={{
-              backgroundColor: "#ffe0d0",
-              borderBottom: "3px solid #000",
-              padding: "11px 16px",
+              backgroundColor: "#faf7f2",
+              borderBottom: "1px solid rgba(0,0,0,0.06)",
+              padding: "14px 18px",
               display: "flex",
               alignItems: "center",
-              gap: "8px",
+              gap: "10px",
               flexWrap: "wrap",
             }}
           >
-            <FolderOpen size={16} />
+            <FolderOpen size={16} color="#8a8a8a" />
             <span
               style={{
                 fontFamily: "var(--font-display)",
-                fontSize: "1.15rem",
-                letterSpacing: "0.05em",
+                fontSize: "1.1rem",
+                fontWeight: 600,
+                letterSpacing: "0.01em",
+                color: "#3a3a3a",
               }}
             >
-              📂 SNIPPET TERSIMPAN
+              📂 Snippet Tersimpan
             </span>
-            <Tag bg="#000" color="#ffe0d0">
-              {snippets.length} SNIPPET
+            <Tag bg="#f0ead4" color="#5a5a3a">
+              {snippets.length} snippet
             </Tag>
             <button
               onClick={() => void refreshSnippets()}
               title="Refresh list"
+              className="cl-btn"
               style={{
                 marginLeft: "auto",
-                backgroundColor: "#ffe8a3",
-                border: "2px solid #000",
+                backgroundColor: "#fff",
+                color: "#5a5a5a",
+                border: "1px solid rgba(0,0,0,0.1)",
                 borderRadius: "8px",
-                padding: "5px 10px",
+                padding: "6px 12px",
                 fontSize: "0.75rem",
-                fontWeight: 900,
+                fontWeight: 500,
                 cursor: "pointer",
                 fontFamily: "var(--font-body)",
                 display: "flex",
                 alignItems: "center",
-                gap: "4px",
+                gap: "5px",
               }}
             >
               ⟳ Refresh
@@ -1621,8 +1663,8 @@ export default function Home() {
 
           <div
             style={{
-              padding: "14px",
-              backgroundColor: "#fef9f0",
+              padding: "18px",
+              backgroundColor: "#faf9f6",
               maxHeight: "320px",
               overflowY: "auto",
             }}
@@ -1631,9 +1673,9 @@ export default function Home() {
               <div
                 style={{
                   textAlign: "center",
-                  padding: "24px",
-                  color: "#777",
-                  fontWeight: 800,
+                  padding: "28px",
+                  color: "#8a8a8a",
+                  fontWeight: 400,
                   fontSize: "0.85rem",
                 }}
               >
@@ -1641,8 +1683,8 @@ export default function Home() {
                   style={{
                     width: 22,
                     height: 22,
-                    border: "3px solid #000",
-                    borderTopColor: "transparent",
+                    border: "2px solid rgba(0,0,0,0.1)",
+                    borderTopColor: "#c9a0a0",
                     borderRadius: "50%",
                     margin: "0 auto 10px",
                     animation: "spin 0.7s linear infinite",
@@ -1654,24 +1696,26 @@ export default function Home() {
               <div
                 style={{
                   textAlign: "center",
-                  padding: "24px",
+                  padding: "28px",
                 }}
               >
                 <p
                   style={{
                     fontFamily: "var(--font-display)",
-                    fontSize: "1.4rem",
-                    letterSpacing: "0.04em",
+                    fontSize: "1.25rem",
+                    fontWeight: 500,
+                    letterSpacing: "0.01em",
                     margin: "0 0 6px 0",
+                    color: "#5a5a5a",
                   }}
                 >
                   📭 Belum ada snippet
                 </p>
                 <p
                   style={{
-                    fontSize: "0.85rem",
-                    fontWeight: 700,
-                    color: "#555",
+                    fontSize: "0.82rem",
+                    fontWeight: 400,
+                    color: "#8a8a8a",
                     margin: 0,
                     fontFamily: "var(--font-body)",
                   }}
@@ -1686,7 +1730,7 @@ export default function Home() {
                   display: "grid",
                   gridTemplateColumns:
                     "repeat(auto-fill, minmax(min(100%, 280px), 1fr))",
-                  gap: "10px",
+                  gap: "12px",
                 }}
               >
                 {snippets.map((s) => {
@@ -1698,29 +1742,30 @@ export default function Home() {
                       key={s.id}
                       style={{
                         backgroundColor: "#fff",
-                        border: "2px solid #000",
-                        borderRadius: "10px",
-                        padding: "10px 12px",
-                        boxShadow: "3px 3px 0 #000",
+                        border: "1px solid rgba(0,0,0,0.06)",
+                        borderRadius: "12px",
+                        padding: "12px 14px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
                         display: "flex",
                         flexDirection: "column",
-                        gap: "6px",
+                        gap: "8px",
+                        transition: "box-shadow 0.2s ease, transform 0.2s ease",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: "6px",
+                          gap: "8px",
                         }}
                       >
                         <div
                           style={{
-                            width: 28,
-                            height: 28,
-                            backgroundColor: lang?.color ?? "#ffe8a3",
-                            border: "2px solid #000",
-                            borderRadius: "6px",
+                            width: 30,
+                            height: 30,
+                            backgroundColor: lang?.color ?? "#f0ead4",
+                            border: "1px solid rgba(0,0,0,0.06)",
+                            borderRadius: "8px",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -1733,13 +1778,14 @@ export default function Home() {
                         <p
                           style={{
                             fontSize: "0.82rem",
-                            fontWeight: 900,
+                            fontWeight: 600,
                             margin: 0,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                             flex: 1,
                             minWidth: 0,
+                            color: "#3a3a3a",
                           }}
                           title={s.originalFilename}
                         >
@@ -1753,14 +1799,14 @@ export default function Home() {
                           flexWrap: "wrap",
                         }}
                       >
-                        <Tag bg="#d4f0e4">
+                        <Tag bg="#e8f0e4" color="#4a6a4a">
                           {s.totalBlocks} blok
                         </Tag>
-                        <Tag bg="#f5f0ff">
+                        <Tag bg="#e4e0f0" color="#5a4a6a">
                           {(s.fileSize / 1024).toFixed(1)} KB
                         </Tag>
                         {s.tags && s.tags.trim() && (
-                          <Tag bg="#ffe8a3">
+                          <Tag bg="#f0ead4" color="#5a5a3a">
                             🏷 {s.tags.split(",")[0]?.trim()}
                           </Tag>
                         )}
@@ -1776,8 +1822,8 @@ export default function Home() {
                         <span
                           style={{
                             fontSize: "0.66rem",
-                            fontWeight: 800,
-                            color: "#666",
+                            fontWeight: 400,
+                            color: "#9a9a9a",
                           }}
                         >
                           {new Date(s.createdAt).toLocaleDateString("id-ID", {
@@ -1790,14 +1836,15 @@ export default function Home() {
                           <button
                             onClick={() => void handleLoadSnippet(s)}
                             title="Muat snippet ini ke panel hasil"
+                            className="cl-btn"
                             style={{
-                              backgroundColor: "#000",
-                              color: "#ffe8a3",
-                              border: "2px solid #000",
+                              backgroundColor: "#3a3a3a",
+                              color: "#faf9f6",
+                              border: "1px solid #3a3a3a",
                               borderRadius: "6px",
-                              padding: "4px 9px",
+                              padding: "5px 10px",
                               fontSize: "0.72rem",
-                              fontWeight: 900,
+                              fontWeight: 500,
                               cursor: "pointer",
                               fontFamily: "var(--font-body)",
                               display: "flex",
@@ -1810,14 +1857,15 @@ export default function Home() {
                           <button
                             onClick={() => void handleDeleteSnippet(s)}
                             title="Hapus snippet"
+                            className="cl-btn"
                             style={{
-                              backgroundColor: "#ff6b6b",
-                              color: "#fff",
-                              border: "2px solid #000",
+                              backgroundColor: "#fff",
+                              color: "#c9646a",
+                              border: "1px solid rgba(201,100,106,0.25)",
                               borderRadius: "6px",
-                              padding: "4px 7px",
+                              padding: "5px 8px",
                               fontSize: "0.72rem",
-                              fontWeight: 900,
+                              fontWeight: 500,
                               cursor: "pointer",
                               display: "flex",
                               alignItems: "center",
@@ -1848,10 +1896,9 @@ export default function Home() {
       {/* ══ FOOTER ══ */}
       <footer
         style={{
-          backgroundColor: "#ffe8a3",
-          borderTop: "3px solid #000",
-          boxShadow: "0 -5px 0 #000",
-          padding: "10px 16px",
+          backgroundColor: "#faf7f2",
+          borderTop: "1px solid rgba(0,0,0,0.06)",
+          padding: "14px 20px",
           marginTop: "auto",
           textAlign: "center",
           fontFamily: "var(--font-body)",
@@ -1860,13 +1907,15 @@ export default function Home() {
         <p
           style={{
             margin: 0,
-            fontFamily: "var(--font-display)",
-            fontSize: "0.95rem",
-            letterSpacing: "0.04em",
+            fontFamily: "var(--font-body)",
+            fontSize: "0.82rem",
+            fontWeight: 400,
+            letterSpacing: "0.02em",
+            color: "#8a8a8a",
           }}
         >
-          CodeLooter! · Ekstrak kode dari dokumen ·{" "}
-          <span style={{ color: "#ff6b6b" }}>BETA</span>
+          CodeLooter · Ekstrak kode dari dokumen ·{" "}
+          <span style={{ color: "#c9a0a0", fontWeight: 500 }}>Beta</span>
         </p>
       </footer>
     </div>

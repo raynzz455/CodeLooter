@@ -1,0 +1,1875 @@
+     1→"use client";
+     2→
+     3→// CodeLooter — main page (neo-brutalist redesign).
+     4→//
+     5→// Adapted from the original CodeLooter repo's app/page.tsx:
+     6→//   - Removed auth/user profile (no login in our single-user sandbox).
+     7→//   - Removed useRouter navigation — this is a single-page app.
+     8→//   - Removed SplashScreen (no equivalent component in this project).
+     9→//   - extractCode → extractFile (pattern-based, 100% free, no LLM).
+    10→//   - saveSnippet signature now takes (filename, blocks, lang, size, tags).
+    11→//   - Added a "SNIPPET TERSIMPAN" section below the main grid that lists
+    12→//     saved snippets and lets the user load one back into the result panel
+    13→//     or delete it.
+    14→
+    15→import { useState, useCallback, useEffect, useRef } from "react";
+    16→import {
+    17→  ChevronDown,
+    18→  Code2,
+    19→  FileText,
+    20→  Upload,
+    21→  X,
+    22→  Zap,
+    23→  Copy,
+    24→  Check,
+    25→  Save,
+    26→  FolderOpen,
+    27→  Trash2,
+    28→  Sparkles,
+    29→} from "lucide-react";
+    30→import { toast } from "sonner";
+    31→import { LANGUAGES, STATS, SAMPLE_CODES } from "@/components/codelooter/data";
+    32→import {
+    33→  extractFile,
+    34→  saveSnippet,
+    35→  listSnippets,
+    36→  deleteSnippet,
+    37→  getSnippet,
+    38→  type CodeBlock,
+    39→  type ExtractResult,
+    40→  type SnippetMeta,
+    41→} from "@/lib/codelooter-api";
+    42→
+    43→const ACCEPTED_EXT = /\.(pdf|doc|docx|pptx?|xlsx?|txt|md|html|ipynb|tex)$/i;
+    44→
+    45→// ─── Reusable presentational primitives ───
+    46→// All neo-brutalist styling is inline (3px black borders, hard shadows,
+    47→// bright pastel colors) so the visual language matches the original repo
+    48→// exactly. No Tailwind classes for these elements.
+    49→
+    50→function Tag({
+    51→  bg = "#ffe8a3",
+    52→  color = "#000",
+    53→  children,
+    54→}: {
+    55→  bg?: string;
+    56→  color?: string;
+    57→  children: React.ReactNode;
+    58→}) {
+    59→  return (
+    60→    <span
+    61→      style={{
+    62→        backgroundColor: bg,
+    63→        color,
+    64→        border: "2px solid #000",
+    65→        borderRadius: "6px",
+    66→        padding: "2px 9px",
+    67→        fontSize: "0.68rem",
+    68→        fontWeight: 900,
+    69→        whiteSpace: "nowrap",
+    70→        fontFamily: "var(--font-body)",
+    71→      }}
+    72→    >
+    73→      {children}
+    74→    </span>
+    75→  );
+    76→}
+    77→
+    78→function Card({
+    79→  children,
+    80→  style = {},
+    81→}: {
+    82→  children: React.ReactNode;
+    83→  style?: React.CSSProperties;
+    84→}) {
+    85→  return (
+    86→    <div
+    87→      style={{
+    88→        backgroundColor: "#fff",
+    89→        border: "3px solid #000",
+    90→        borderRadius: "16px",
+    91→        boxShadow: "5px 5px 0 #000",
+    92→        overflow: "hidden",
+    93→        display: "flex",
+    94→        flexDirection: "column",
+    95→        ...style,
+    96→      }}
+    97→    >
+    98→      {children}
+    99→    </div>
+   100→  );
+   101→}
+   102→
+   103→function CardHeader({
+   104→  bg,
+   105→  children,
+   106→}: {
+   107→  bg: string;
+   108→  children: React.ReactNode;
+   109→}) {
+   110→  return (
+   111→    <div
+   112→      style={{
+   113→        backgroundColor: bg,
+   114→        borderBottom: "3px solid #000",
+   115→        padding: "11px 16px",
+   116→        display: "flex",
+   117→        alignItems: "center",
+   118→        gap: "8px",
+   119→        flexShrink: 0,
+   120→      }}
+   121→    >
+   122→      {children}
+   123→    </div>
+   124→  );
+   125→}
+   126→
+   127→// ─── Active-block picker for the result panel ───
+   128→// When the extractor returns multiple blocks (possibly in different
+   129→// languages) we show a row of language chips so the user can switch the
+   130→// displayed block without re-extracting.
+   131→function LangChip({
+   132→  lang,
+   133→  active,
+   134→  onClick,
+   135→}: {
+   136→  lang: { id: string; label: string; emoji: string; color: string };
+   137→  active: boolean;
+   138→  onClick: () => void;
+   139→}) {
+   140→  return (
+   141→    <button
+   142→      onClick={onClick}
+   143→      style={{
+   144→        backgroundColor: active ? lang.color : "#fff",
+   145→        border: "2px solid #000",
+   146→        borderRadius: "8px",
+   147→        padding: "4px 10px",
+   148→        fontSize: "0.75rem",
+   149→        fontWeight: 900,
+   150→        cursor: "pointer",
+   151→        boxShadow: active ? "2px 2px 0 #000" : "none",
+   152→        transform: active ? "translate(1px,1px)" : "",
+   153→        fontFamily: "var(--font-body)",
+   154→        display: "flex",
+   155→        alignItems: "center",
+   156→        gap: "4px",
+   157→        transition: "all 0.1s",
+   158→      }}
+   159→    >
+   160→      <span>{lang.emoji}</span>
+   161→      {lang.label}
+   162→    </button>
+   163→  );
+   164→}
+   165→
+   166→// ─── Main page ───
+   167→export default function Home() {
+   168→  // Language picker state.
+   169→  const [selectedLang, setSelectedLang] = useState<string>("r");
+   170→  const [dropdownOpen, setDropdownOpen] = useState(false);
+   171→
+   172→  // Upload state.
+   173→  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+   174→  const [isDragging, setIsDragging] = useState(false);
+   175→  const fileInputRef = useRef<HTMLInputElement>(null);
+   176→
+   177→  // Extraction state.
+   178→  const [isExtracting, setIsExtracting] = useState(false);
+   179→  const [extractedBlocks, setExtractedBlocks] = useState<CodeBlock[]>([]);
+   180→  const [extractError, setExtractError] = useState<string | null>(null);
+   181→  const [extractMeta, setExtractMeta] = useState<{
+   182→    method?: string;
+   183→    durationMs?: number;
+   184→    cached?: boolean;
+   185→  }>({});
+   186→
+   187→  // Per-result actions.
+   188→  const [copied, setCopied] = useState(false);
+   189→  const [saving, setSaving] = useState(false);
+   190→  const [savedSnippetId, setSavedSnippetId] = useState<string | null>(null);
+   191→
+   192→  // Snippet list (sidebar / footer section).
+   193→  const [snippets, setSnippets] = useState<SnippetMeta[]>([]);
+   194→  const [loadingSnippets, setLoadingSnippets] = useState(true);
+   195→
+   196→  const langDropdownRef = useRef<HTMLDivElement>(null);
+   197→
+   198→  const extracted = extractedBlocks.length > 0;
+   199→  const currentLang =
+   200→    LANGUAGES.find((l) => l.id === selectedLang) ?? LANGUAGES[0];
+   201→
+   202→  // active block for preview — prefers the user-selected language, else the
+   203→  // first non-"unknown" block, else the first block, else falls back to the
+   204→  // sample code so the panel is never empty.
+   205→  const activeBlock =
+   206→    extractedBlocks.find((b) => b.lang === selectedLang) ??
+   207→    extractedBlocks.find((b) => b.lang !== "unknown") ??
+   208→    extractedBlocks[0] ??
+   209→    null;
+   210→  const displayCode = activeBlock?.code ?? SAMPLE_CODES[selectedLang] ?? "";
+   211→
+   212→  // Detected languages across all extracted blocks.
+   213→  const detectedLangs = Array.from(
+   214→    new Set(extractedBlocks.map((b) => b.lang)),
+   215→  ).filter((l) => LANGUAGES.some((lang) => lang.id === l));
+   216→
+   217→  // ─── Load saved snippets from /api/snippets on mount ───
+   218→  const refreshSnippets = useCallback(async () => {
+   219→    setLoadingSnippets(true);
+   220→    try {
+   221→      const list = await listSnippets();
+   222→      setSnippets(list);
+   223→    } catch (err) {
+   224→      // Don't toast on initial load — just log to console.
+   225→      console.error("Failed to load snippets:", err);
+   226→    } finally {
+   227→      setLoadingSnippets(false);
+   228→    }
+   229→  }, []);
+   230→
+   231→  useEffect(() => {
+   232→    void refreshSnippets();
+   233→  }, [refreshSnippets]);
+   234→
+   235→  // Close language dropdown on outside click.
+   236→  useEffect(() => {
+   237→    const handler = (e: MouseEvent) => {
+   238→      if (
+   239→        langDropdownRef.current &&
+   240→        !langDropdownRef.current.contains(e.target as Node)
+   241→      ) {
+   242→        setDropdownOpen(false);
+   243→      }
+   244→    };
+   245→    document.addEventListener("mousedown", handler);
+   246→    return () => document.removeEventListener("mousedown", handler);
+   247→  }, []);
+   248→
+   249→  // ─── File handling ───
+   250→  const setFile = (file: File | null) => {
+   251→    setUploadedFile(file);
+   252→    setExtractedBlocks([]);
+   253→    setExtractError(null);
+   254→    setSavedSnippetId(null);
+   255→    setExtractMeta({});
+   256→  };
+   257→
+   258→  const handleDrop = useCallback((e: React.DragEvent) => {
+   259→    e.preventDefault();
+   260→    setIsDragging(false);
+   261→    const file = e.dataTransfer.files[0];
+   262→    if (file && ACCEPTED_EXT.test(file.name)) setFile(file);
+   263→    else if (file)
+   264→      toast.error("Format file tidak didukung", {
+   265→        description: file.name,
+   266→      });
+   267→  }, []);
+   268→
+   269→  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+   270→    const file = e.target.files?.[0];
+   271→    if (file) setFile(file);
+   272→  };
+   273→
+   274→  // ─── Extract ───
+   275→  // 100% pattern-based extraction. No LLM, no external API.
+   276→  const handleExtract = async () => {
+   277→    if (!uploadedFile) return;
+   278→    setIsExtracting(true);
+   279→    setExtractError(null);
+   280→    setExtractedBlocks([]);
+   281→    setSavedSnippetId(null);
+   282→    setExtractMeta({});
+   283→
+   284→    try {
+   285→      const data: ExtractResult = await extractFile(uploadedFile, selectedLang);
+   286→
+   287→      const blocks = data.blocks ?? [];
+   288→      setExtractedBlocks(blocks);
+   289→      setExtractMeta({
+   290→        method: data.stats?.method,
+   291→        durationMs: data.stats?.durationMs,
+   292→        cached: data.cached,
+   293→      });
+   294→
+   295→      if (blocks.length > 0) {
+   296→        const firstKnown =
+   297→          blocks.find((b) => b.lang !== "unknown") ?? blocks[0];
+   298→        setSelectedLang(firstKnown.lang);
+   299→        toast.success(
+   300→          `${blocks.length} blok kode berhasil diekstrak!${data.cached ? " (cache)" : ""}`,
+   301→          {
+   302→            description: `⚡ ${data.stats?.method ?? "pattern"}`,
+   303→          },
+   304→        );
+   305→      } else {
+   306→        toast.warning("Tidak ada blok kode terdeteksi", {
+   307→          description: "Coba bahasa lain atau periksa format file.",
+   308→        });
+   309→      }
+   310→    } catch (err) {
+   311→      const msg =
+   312→        err instanceof Error ? err.message : "Koneksi gagal — coba lagi";
+   313→      setExtractError(msg);
+   314→      toast.error("Ekstraksi gagal", { description: msg });
+   315→    } finally {
+   316→      setIsExtracting(false);
+   317→    }
+   318→  };
+   319→
+   320→  // ─── Save snippet ───
+   321→  // Persists the current extracted blocks to the local SQLite store via
+   322→  // /api/snippets. On success, refreshes the snippet list and shows a "saved"
+   323→  // state on the result panel's save button.
+   324→  const handleSave = async () => {
+   325→    if (!uploadedFile || extractedBlocks.length === 0) return;
+   326→    setSaving(true);
+   327→    try {
+   328→      const { id } = await saveSnippet(
+   329→        uploadedFile.name,
+   330→        extractedBlocks,
+   331→        selectedLang,
+   332→        uploadedFile.size,
+   333→        "",
+   334→      );
+   335→      setSavedSnippetId(id);
+   336→      toast.success("Snippet tersimpan!", {
+   337→        description: `${extractedBlocks.length} blok · ${uploadedFile.name}`,
+   338→      });
+   339→      void refreshSnippets();
+   340→    } catch (err) {
+   341→      const msg =
+   342→        err instanceof Error ? err.message : "Gagal menyimpan snippet";
+   343→      toast.error("Gagal menyimpan", { description: msg });
+   344→    } finally {
+   345→      setSaving(false);
+   346→    }
+   347→  };
+   348→
+   349→  // ─── Load a saved snippet into the result panel ───
+   350→  // Replaces the current extracted blocks with the snippet's blocks and
+   351→  // updates the filename/lang so the user can keep editing / re-saving.
+   352→  const handleLoadSnippet = async (s: SnippetMeta) => {
+   353→    try {
+   354→      const detail = await getSnippet(s.id);
+   355→      setUploadedFile(
+   356→        new File([""], detail.originalFilename, { type: "text/plain" }),
+   357→      );
+   358→      setExtractedBlocks(detail.blocks);
+   359→      setExtractMeta({ method: "saved-snippet" });
+   360→      setSavedSnippetId(detail.id);
+   361→      setExtractError(null);
+   362→      setSelectedLang(detail.extractedLang || "auto");
+   363→      toast.success("Snippet dimuat", {
+   364→        description: `${detail.blocks.length} blok · ${detail.originalFilename}`,
+   365→      });
+   366→    } catch (err) {
+   367→      const msg = err instanceof Error ? err.message : "Gagal memuat snippet";
+   368→      toast.error("Gagal memuat", { description: msg });
+   369→    }
+   370→  };
+   371→
+   372→  const handleDeleteSnippet = async (s: SnippetMeta) => {
+   373→    if (!confirm(`Hapus snippet "${s.originalFilename}"?`)) return;
+   374→    try {
+   375→      await deleteSnippet(s.id);
+   376→      setSnippets((prev) => prev.filter((x) => x.id !== s.id));
+   377→      toast.success("Snippet dihapus", { description: s.originalFilename });
+   378→    } catch (err) {
+   379→      const msg = err instanceof Error ? err.message : "Gagal menghapus";
+   380→      toast.error("Gagal menghapus", { description: msg });
+   381→    }
+   382→  };
+   383→
+   384→  // ─── Copy & download ───
+   385→  const handleCopy = async () => {
+   386→    try {
+   387→      await navigator.clipboard.writeText(displayCode);
+   388→      setCopied(true);
+   389→      setTimeout(() => setCopied(false), 2000);
+   390→      toast.success("Kode disalin!", {
+   391→        description: `${activeBlock?.lines ?? displayCode.split("\n").length} baris`,
+   392→      });
+   393→    } catch {
+   394→      toast.error("Gagal menyalin ke clipboard");
+   395→    }
+   396→  };
+   397→
+   398→  const handleDownload = () => {
+   399→    if (!activeBlock) return;
+   400→    const blob = new Blob([activeBlock.code], {
+   401→      type: "text/plain;charset=utf-8",
+   402→    });
+   403→    const url = URL.createObjectURL(blob);
+   404→    const a = document.createElement("a");
+   405→    a.href = url;
+   406→    a.download = `codelooter_${activeBlock.lang}.${currentLang?.ext ?? "txt"}`;
+   407→    a.click();
+   408→    URL.revokeObjectURL(url);
+   409→    toast.success("File diunduh", {
+   410→      description: a.download,
+   411→    });
+   412→  };
+   413→
+   414→  return (
+   415→    <div
+   416→      style={{
+   417→        backgroundColor: "#fef9f0",
+   418→        fontFamily: "var(--font-body)",
+   419→        minHeight: "100vh",
+   420→        display: "flex",
+   421→        flexDirection: "column",
+   422→      }}
+   423→    >
+   424→      {/* ══ HEADER ══ */}
+   425→      <header
+   426→        style={{
+   427→          backgroundColor: "#ffe8a3",
+   428→          borderBottom: "3px solid #000",
+   429→          boxShadow: "0 5px 0 #000",
+   430→          position: "sticky",
+   431→          top: 0,
+   432→          zIndex: 50,
+   433→          padding: "8px 16px",
+   434→          display: "flex",
+   435→          alignItems: "center",
+   436→          justifyContent: "space-between",
+   437→          gap: "8px",
+   438→        }}
+   439→      >
+   440→        <div
+   441→          style={{
+   442→            display: "flex",
+   443→            alignItems: "center",
+   444→            gap: "10px",
+   445→            minWidth: 0,
+   446→          }}
+   447→        >
+   448→          <div
+   449→            style={{
+   450→              width: 40,
+   451→              height: 40,
+   452→              border: "3px solid #000",
+   453→              borderRadius: "10px",
+   454→              backgroundColor: "#ff6b6b",
+   455→              boxShadow: "3px 3px 0 #000",
+   456→              flexShrink: 0,
+   457→              display: "flex",
+   458→              alignItems: "center",
+   459→              justifyContent: "center",
+   460→            }}
+   461→          >
+   462→            <Code2 size={22} strokeWidth={2.5} />
+   463→          </div>
+   464→          <h1
+   465→            style={{
+   466→              fontFamily: "var(--font-display)",
+   467→              fontSize: "clamp(1.5rem,5vw,2.1rem)",
+   468→              letterSpacing: "0.05em",
+   469→              lineHeight: 1,
+   470→              textShadow: "3px 3px 0 #ff6b6b",
+   471→              whiteSpace: "nowrap",
+   472→              margin: 0,
+   473→            }}
+   474→          >
+   475→            CodeLooter!
+   476→          </h1>
+   477→          <div
+   478→            style={{
+   479→              backgroundColor: "#ff6b6b",
+   480→              border: "2px solid #000",
+   481→              borderRadius: "6px",
+   482→              padding: "1px 7px",
+   483→              fontFamily: "var(--font-display)",
+   484→              fontSize: "0.78rem",
+   485→              color: "#fff",
+   486→              boxShadow: "2px 2px 0 #000",
+   487→              flexShrink: 0,
+   488→            }}
+   489→          >
+   490→            BETA
+   491→          </div>
+   492→        </div>
+   493→
+   494→        <div
+   495→          style={{
+   496→            display: "flex",
+   497→            alignItems: "center",
+   498→            gap: "8px",
+   499→            flexShrink: 0,
+   500→          }}
+   501→        >
+   502→          {extractMeta.method && (
+   503→            <Tag bg="#d4f0e4" color="#000">⚡ PATTERN</Tag>
+   504→          )}
+   505→          <button
+   506→            onClick={() => fileInputRef.current?.click()}
+   507→            style={{
+   508→              backgroundColor: "#000",
+   509→              color: "#ffe8a3",
+   510→              border: "3px solid #000",
+   511→              borderRadius: "10px",
+   512→              padding: "8px 14px",
+   513→              fontFamily: "var(--font-display)",
+   514→              fontSize: "0.95rem",
+   515→              letterSpacing: "0.05em",
+   516→              cursor: "pointer",
+   517→              boxShadow: "4px 4px 0 #ff6b6b",
+   518→              display: "flex",
+   519→              alignItems: "center",
+   520→              gap: "6px",
+   521→              transition: "transform 0.1s, box-shadow 0.1s",
+   522→            }}
+   523→            onMouseDown={(e) => {
+   524→              (e.currentTarget as HTMLElement).style.transform =
+   525→                "translate(2px,2px)";
+   526→              (e.currentTarget as HTMLElement).style.boxShadow =
+   527→                "2px 2px 0 #ff6b6b";
+   528→            }}
+   529→            onMouseUp={(e) => {
+   530→              (e.currentTarget as HTMLElement).style.transform = "";
+   531→              (e.currentTarget as HTMLElement).style.boxShadow =
+   532→                "4px 4px 0 #ff6b6b";
+   533→            }}
+   534→          >
+   535→            <Upload size={15} /> PILIH FILE
+   536→          </button>
+   537→        </div>
+   538→      </header>
+   539→
+   540→      {/* ══ MAIN ══ */}
+   541→      <main
+   542→        style={{
+   543→          padding: "16px",
+   544→          maxWidth: "1400px",
+   545→          margin: "0 auto",
+   546→          width: "100%",
+   547→          flex: 1,
+   548→        }}
+   549→      >
+   550→        {/* STATS */}
+   551→        <div className="stats-grid">
+   552→          {STATS.map((s) => (
+   553→            <div
+   554→              key={s.label}
+   555→              style={{
+   556→                backgroundColor: s.color,
+   557→                border: "3px solid #000",
+   558→                borderRadius: "10px",
+   559→                padding: "10px 14px",
+   560→                boxShadow: "4px 4px 0 #000",
+   561→              }}
+   562→            >
+   563→              <p
+   564→                style={{
+   565→                  fontSize: "clamp(1.2rem,4vw,1.6rem)",
+   566→                  fontFamily: "var(--font-display)",
+   567→                  letterSpacing: "0.04em",
+   568→                  lineHeight: 1,
+   569→                  margin: 0,
+   570→                }}
+   571→              >
+   572→                {s.val}
+   573→              </p>
+   574→              <p
+   575→                style={{
+   576→                  fontSize: "0.7rem",
+   577→                  fontWeight: 800,
+   578→                  color: "#333",
+   579→                  marginTop: "2px",
+   580→                  marginBottom: 0,
+   581→                  fontFamily: "var(--font-body)",
+   582→                }}
+   583→              >
+   584→                {s.label}
+   585→              </p>
+   586→            </div>
+   587→          ))}
+   588→        </div>
+   589→
+   590→        {/* THREE COLUMNS */}
+   591→        <div className="main-grid">
+   592→          {/* COL 1: PILIH BAHASA */}
+   593→          <Card>
+   594→            <CardHeader bg="#ffe8a3">
+   595→              <Code2 size={15} />
+   596→              <span
+   597→                style={{
+   598→                  fontFamily: "var(--font-display)",
+   599→                  fontSize: "1.1rem",
+   600→                  letterSpacing: "0.05em",
+   601→                }}
+   602→              >
+   603→                PILIH BAHASA
+   604→              </span>
+   605→            </CardHeader>
+   606→            <div
+   607→              style={{
+   608→                padding: "14px",
+   609→                display: "flex",
+   610→                flexDirection: "column",
+   611→                gap: "10px",
+   612→                flex: 1,
+   613→                overflow: "hidden",
+   614→              }}
+   615→            >
+   616→              {/* detected langs after extraction */}
+   617→              {detectedLangs.length > 0 && (
+   618→                <div
+   619→                  style={{
+   620→                    backgroundColor: "#d4f0e4",
+   621→                    border: "2px solid #000",
+   622→                    borderRadius: "10px",
+   623→                    padding: "10px 12px",
+   624→                  }}
+   625→                >
+   626→                  <p
+   627→                    style={{
+   628→                      fontSize: "0.65rem",
+   629→                      fontWeight: 900,
+   630→                      textTransform: "uppercase",
+   631→                      letterSpacing: "0.08em",
+   632→                      marginBottom: "7px",
+   633→                      marginTop: 0,
+   634→                    }}
+   635→                  >
+   636→                    🔍 Terdeteksi
+   637→                  </p>
+   638→                  <div
+   639→                    style={{
+   640→                      display: "flex",
+   641→                      flexWrap: "wrap",
+   642→                      gap: "5px",
+   643→                    }}
+   644→                  >
+   645→                    {detectedLangs.map((id) => {
+   646→                      const lang = LANGUAGES.find((l) => l.id === id);
+   647→                      const isActive = id === selectedLang;
+   648→                      return (
+   649→                        <LangChip
+   650→                          key={id}
+   651→                          lang={
+   652→                            lang ?? {
+   653→                              id,
+   654→                              label: id,
+   655→                              emoji: "📄",
+   656→                              color: "#ffe8a3",
+   657→                            }
+   658→                          }
+   659→                          active={isActive}
+   660→                          onClick={() => setSelectedLang(id)}
+   661→                        />
+   662→                      );
+   663→                    })}
+   664→                  </div>
+   665→                </div>
+   666→              )}
+   667→
+   668→              {/* dropdown */}
+   669→              <div ref={langDropdownRef} style={{ position: "relative" }}>
+   670→                {detectedLangs.length > 0 && (
+   671→                  <p
+   672→                    style={{
+   673→                      fontSize: "0.65rem",
+   674→                      fontWeight: 900,
+   675→                      textTransform: "uppercase",
+   676→                      letterSpacing: "0.08em",
+   677→                      marginBottom: "6px",
+   678→                      marginTop: 0,
+   679→                      color: "#555",
+   680→                    }}
+   681→                  >
+   682→                    Override manual
+   683→                  </p>
+   684→                )}
+   685→                <button
+   686→                  onClick={() => setDropdownOpen(!dropdownOpen)}
+   687→                  style={{
+   688→                    width: "100%",
+   689→                    backgroundColor: currentLang?.color ?? "#ffe8a3",
+   690→                    border: "3px solid #000",
+   691→                    borderRadius: "10px",
+   692→                    padding: "10px 14px",
+   693→                    display: "flex",
+   694→                    alignItems: "center",
+   695→                    justifyContent: "space-between",
+   696→                    cursor: "pointer",
+   697→                    boxShadow: "4px 4px 0 #000",
+   698→                    fontWeight: 900,
+   699→                    fontSize: "0.95rem",
+   700→                    fontFamily: "var(--font-body)",
+   701→                  }}
+   702→                >
+   703→                  <span
+   704→                    style={{
+   705→                      display: "flex",
+   706→                      alignItems: "center",
+   707→                      gap: "8px",
+   708→                    }}
+   709→                  >
+   710→                    <span style={{ fontSize: "1.2rem" }}>
+   711→                      {currentLang?.emoji}
+   712→                    </span>
+   713→                    {currentLang?.label}
+   714→                  </span>
+   715→                  <ChevronDown
+   716→                    size={16}
+   717→                    style={{
+   718→                      transform: dropdownOpen ? "rotate(180deg)" : "",
+   719→                      transition: "transform 0.2s",
+   720→                      flexShrink: 0,
+   721→                    }}
+   722→                  />
+   723→                </button>
+   724→                {dropdownOpen && (
+   725→                  <div
+   726→                    style={{
+   727→                      position: "absolute",
+   728→                      top: "calc(100% + 4px)",
+   729→                      left: 0,
+   730→                      right: 0,
+   731→                      backgroundColor: "#fff",
+   732→                      border: "3px solid #000",
+   733→                      borderRadius: "10px",
+   734→                      boxShadow: "5px 5px 0 #000",
+   735→                      zIndex: 30,
+   736→                      overflow: "hidden",
+   737→                      animation: "popIn 0.2s cubic-bezier(0.34,1.56,0.64,1)",
+   738→                    }}
+   739→                  >
+   740→                    {LANGUAGES.map((lang, idx) => (
+   741→                      <button
+   742→                        key={lang.id}
+   743→                        onClick={() => {
+   744→                          setSelectedLang(lang.id);
+   745→                          setDropdownOpen(false);
+   746→                        }}
+   747→                        style={{
+   748→                          width: "100%",
+   749→                          padding: "9px 14px",
+   750→                          backgroundColor:
+   751→                            lang.id === selectedLang ? lang.color : "#fff",
+   752→                          border: "none",
+   753→                          borderBottom:
+   754→                            idx < LANGUAGES.length - 1
+   755→                              ? "2px solid #eee"
+   756→                              : "none",
+   757→                          textAlign: "left",
+   758→                          cursor: "pointer",
+   759→                          display: "flex",
+   760→                          alignItems: "center",
+   761→                          gap: "8px",
+   762→                          fontWeight: 800,
+   763→                          fontSize: "0.88rem",
+   764→                          fontFamily: "var(--font-body)",
+   765→                          transition: "background-color 0.1s",
+   766→                        }}
+   767→                        onMouseEnter={(e) => {
+   768→                          if (lang.id !== selectedLang)
+   769→                            (e.currentTarget as HTMLElement).style.backgroundColor =
+   770→                              "#fef9f0";
+   771→                        }}
+   772→                        onMouseLeave={(e) => {
+   773→                          (e.currentTarget as HTMLElement).style.backgroundColor =
+   774→                            lang.id === selectedLang ? lang.color : "#fff";
+   775→                        }}
+   776→                      >
+   777→                        <span>{lang.emoji}</span>
+   778→                        {lang.label}
+   779→                      </button>
+   780→                    ))}
+   781→                  </div>
+   782→                )}
+   783→              </div>
+   784→
+   785→              {/* info */}
+   786→              <div
+   787→                style={{
+   788→                  backgroundColor: currentLang?.color ?? "#ffe8a3",
+   789→                  border: "2px solid #000",
+   790→                  borderRadius: "10px",
+   791→                  padding: "12px",
+   792→                }}
+   793→              >
+   794→                <p
+   795→                  style={{
+   796→                    fontFamily: "var(--font-display)",
+   797→                    fontSize: "1.25rem",
+   798→                    letterSpacing: "0.04em",
+   799→                    lineHeight: 1,
+   800→                    margin: 0,
+   801→                  }}
+   802→                >
+   803→                  {currentLang?.emoji} {currentLang?.label}
+   804→                </p>
+   805→                <p
+   806→                  style={{
+   807→                    fontSize: "0.75rem",
+   808→                    fontWeight: 700,
+   809→                    color: "#444",
+   810→                    marginTop: "4px",
+   811→                    marginBottom: 0,
+   812→                  }}
+   813→                >
+   814→                  Bahasa terpilih untuk ekstraksi kode.
+   815→                </p>
+   816→              </div>
+   817→
+   818→              <div
+   819→                style={{
+   820→                  backgroundColor: "#fef9f0",
+   821→                  border: "2px dashed #000",
+   822→                  borderRadius: "8px",
+   823→                  padding: "10px 12px",
+   824→                  marginTop: "auto",
+   825→                }}
+   826→              >
+   827→                <p
+   828→                  style={{
+   829→                    fontSize: "0.72rem",
+   830→                    fontWeight: 800,
+   831→                    color: "#555",
+   832→                    lineHeight: 1.5,
+   833→                    margin: 0,
+   834→                  }}
+   835→                >
+   836→                  {detectedLangs.length > 0
+   837→                    ? `💡 ${detectedLangs.length} bahasa ditemukan. Klik chip untuk switch preview.`
+   838→                    : "💡 Bahasa akan terdeteksi otomatis setelah file diekstrak."}
+   839→                </p>
+   840→              </div>
+   841→            </div>
+   842→          </Card>
+   843→
+   844→          {/* COL 2: UPLOAD FILE */}
+   845→          <Card>
+   846→            <CardHeader bg="#d4f0e4">
+   847→              <FileText size={15} />
+   848→              <span
+   849→                style={{
+   850→                  fontFamily: "var(--font-display)",
+   851→                  fontSize: "1.1rem",
+   852→                  letterSpacing: "0.05em",
+   853→                }}
+   854→              >
+   855→                UPLOAD FILE
+   856→              </span>
+   857→              <Tag bg="#000" color="#d4f0e4">
+   858→                PDF · DOC · PPTX
+   859→              </Tag>
+   860→            </CardHeader>
+   861→            <div
+   862→              style={{
+   863→                padding: "14px",
+   864→                display: "flex",
+   865→                flexDirection: "column",
+   866→                flex: 1,
+   867→              }}
+   868→            >
+   869→              {/* drop zone */}
+   870→              <div
+   871→                onDrop={handleDrop}
+   872→                onDragOver={(e) => {
+   873→                  e.preventDefault();
+   874→                  setIsDragging(true);
+   875→                }}
+   876→                onDragLeave={() => setIsDragging(false)}
+   877→                onClick={() =>
+   878→                  !uploadedFile && fileInputRef.current?.click()
+   879→                }
+   880→                role="button"
+   881→                tabIndex={0}
+   882→                onKeyDown={(e) => {
+   883→                  if (
+   884→                    (e.key === "Enter" || e.key === " ") &&
+   885→                    !uploadedFile
+   886→                  )
+   887→                    fileInputRef.current?.click();
+   888→                }}
+   889→                style={{
+   890→                  backgroundColor: isDragging ? "#b8e8d0" : "#fef9f0",
+   891→                  border: "3px dashed #000",
+   892→                  borderRadius: "12px",
+   893→                  cursor: uploadedFile ? "default" : "pointer",
+   894→                  transition: "background-color 0.15s",
+   895→                  position: "relative",
+   896→                  flex: 1,
+   897→                  display: "flex",
+   898→                  flexDirection: "column",
+   899→                  alignItems: "center",
+   900→                  justifyContent: "center",
+   901→                  gap: "14px",
+   902→                  padding: "24px 16px",
+   903→                  minHeight: "200px",
+   904→                }}
+   905→              >
+   906→                {/* corner decorations */}
+   907→                {(["tl", "tr", "bl", "br"] as const).map((c) => (
+   908→                  <div
+   909→                    key={c}
+   910→                    style={{
+   911→                      position: "absolute",
+   912→                      width: 14,
+   913→                      height: 14,
+   914→                      backgroundColor: "#ffe8a3",
+   915→                      border: "2px solid #000",
+   916→                      borderRadius: "3px",
+   917→                      top: c[0] === "t" ? -3 : undefined,
+   918→                      bottom: c[0] === "b" ? -3 : undefined,
+   919→                      left: c[1] === "l" ? -3 : undefined,
+   920→                      right: c[1] === "r" ? -3 : undefined,
+   921→                    }}
+   922→                  />
+   923→                ))}
+   924→
+   925→                {!uploadedFile ? (
+   926→                  <>
+   927→                    <div
+   928→                      style={{
+   929→                        backgroundColor: "#f5f0ff",
+   930→                        border: "3px solid #000",
+   931→                        borderRadius: "50%",
+   932→                        width: "clamp(72px,12vw,96px)",
+   933→                        height: "clamp(72px,12vw,96px)",
+   934→                        display: "flex",
+   935→                        alignItems: "center",
+   936→                        justifyContent: "center",
+   937→                        boxShadow: "5px 5px 0 #000",
+   938→                      }}
+   939→                    >
+   940→                      <Upload size={36} strokeWidth={2.5} />
+   941→                    </div>
+   942→                    <div style={{ textAlign: "center" }}>
+   943→                      <p
+   944→                        style={{
+   945→                          fontFamily: "var(--font-display)",
+   946→                          fontSize: "clamp(1.1rem,3vw,1.55rem)",
+   947→                          letterSpacing: "0.04em",
+   948→                          lineHeight: 1.25,
+   949→                          margin: 0,
+   950→                        }}
+   951→                      >
+   952→                        Jatuhkan dokumenmu di sini!
+   953→                      </p>
+   954→                      <p
+   955→                        style={{
+   956→                          fontSize: "0.82rem",
+   957→                          fontWeight: 700,
+   958→                          color: "#555",
+   959→                          marginTop: "5px",
+   960→                          marginBottom: 0,
+   961→                        }}
+   962→                      >
+   963→                        atau klik untuk memilih file
+   964→                      </p>
+   965→                    </div>
+   966→                    <div
+   967→                      style={{
+   968→                        backgroundColor: "#ffe8a3",
+   969→                        border: "2px solid #000",
+   970→                        borderRadius: "8px",
+   971→                        padding: "5px 16px",
+   972→                        fontSize: "0.75rem",
+   973→                        fontWeight: 800,
+   974→                      }}
+   975→                    >
+   976→                      Maks. 50MB · PDF, MD, IPYNB, TXT, TEX, HTML
+   977→                    </div>
+   978→                  </>
+   979→                ) : (
+   980→                  <>
+   981→                    <div
+   982→                      style={{
+   983→                        backgroundColor: "#d4f0e4",
+   984→                        border: "3px solid #000",
+   985→                        borderRadius: "10px",
+   986→                        padding: "14px 18px",
+   987→                        width: "90%",
+   988→                        maxWidth: 360,
+   989→                        display: "flex",
+   990→                        alignItems: "center",
+   991→                        gap: "10px",
+   992→                        boxShadow: "3px 3px 0 #000",
+   993→                      }}
+   994→                    >
+   995→                      <div
+   996→                        style={{
+   997→                          backgroundColor: "#000",
+   998→                          borderRadius: "8px",
+   999→                          padding: "8px",
+  1000→                          flexShrink: 0,
+  1001→                        }}
+  1002→                      >
+  1003→                        <FileText size={20} color="#d4f0e4" />
+  1004→                      </div>
+  1005→                      <div style={{ flex: 1, minWidth: 0 }}>
+  1006→                        <p
+  1007→                          style={{
+  1008→                            fontWeight: 900,
+  1009→                            fontSize: "0.88rem",
+  1010→                            overflow: "hidden",
+  1011→                            textOverflow: "ellipsis",
+  1012→                            whiteSpace: "nowrap",
+  1013→                            margin: 0,
+  1014→                          }}
+  1015→                        >
+  1016→                          {uploadedFile.name}
+  1017→                        </p>
+  1018→                        <p
+  1019→                          style={{
+  1020→                            fontSize: "0.72rem",
+  1021→                            fontWeight: 700,
+  1022→                            color: "#444",
+  1023→                            margin: 0,
+  1024→                          }}
+  1025→                        >
+  1026→                          {(uploadedFile.size / 1024).toFixed(1)} KB
+  1027→                        </p>
+  1028→                      </div>
+  1029→                      <button
+  1030→                        onClick={(e) => {
+  1031→                          e.stopPropagation();
+  1032→                          setFile(null);
+  1033→                        }}
+  1034→                        style={{
+  1035→                          backgroundColor: "#ff6b6b",
+  1036→                          border: "2px solid #000",
+  1037→                          borderRadius: "6px",
+  1038→                          padding: "5px",
+  1039→                          cursor: "pointer",
+  1040→                          flexShrink: 0,
+  1041→                          display: "flex",
+  1042→                        }}
+  1043→                      >
+  1044→                        <X size={14} color="#fff" />
+  1045→                      </button>
+  1046→                    </div>
+  1047→                    <p
+  1048→                      style={{
+  1049→                        fontFamily: "var(--font-display)",
+  1050→                        fontSize: "1.1rem",
+  1051→                        color: "#009944",
+  1052→                        letterSpacing: "0.03em",
+  1053→                        margin: 0,
+  1054→                      }}
+  1055→                    >
+  1056→                      ✅ File siap diekstrak!
+  1057→                    </p>
+  1058→                  </>
+  1059→                )}
+  1060→                <input
+  1061→                  type="file"
+  1062→                  accept=".pdf,.doc,.docx,.pptx,.ppt,.xlsx,.xls,.txt,.md,.html,.ipynb,.tex"
+  1063→                  onChange={handleFileInput}
+  1064→                  style={{ display: "none" }}
+  1065→                />
+  1066→              </div>
+  1067→
+  1068→              {/* extract button */}
+  1069→              <button
+  1070→                onClick={handleExtract}
+  1071→                disabled={!uploadedFile || isExtracting}
+  1072→                style={{
+  1073→                  marginTop: "12px",
+  1074→                  width: "100%",
+  1075→                  backgroundColor: uploadedFile ? "#000" : "#ccc",
+  1076→                  color: uploadedFile ? "#ffe8a3" : "#888",
+  1077→                  border: "3px solid #000",
+  1078→                  borderRadius: "10px",
+  1079→                  padding: "14px",
+  1080→                  fontFamily: "var(--font-display)",
+  1081→                  fontSize: "clamp(1rem,3vw,1.35rem)",
+  1082→                  letterSpacing: "0.06em",
+  1083→                  cursor:
+  1084→                    uploadedFile && !isExtracting ? "pointer" : "not-allowed",
+  1085→                  boxShadow: uploadedFile ? "5px 5px 0 #ff6b6b" : "none",
+  1086→                  transition: "transform 0.1s, box-shadow 0.1s",
+  1087→                  display: "flex",
+  1088→                  alignItems: "center",
+  1089→                  justifyContent: "center",
+  1090→                  gap: "8px",
+  1091→                  flexShrink: 0,
+  1092→                }}
+  1093→                onMouseDown={(e) => {
+  1094→                  if (uploadedFile) {
+  1095→                    (e.currentTarget as HTMLElement).style.transform =
+  1096→                      "translate(3px,3px)";
+  1097→                    (e.currentTarget as HTMLElement).style.boxShadow =
+  1098→                      "2px 2px 0 #ff6b6b";
+  1099→                  }
+  1100→                }}
+  1101→                onMouseUp={(e) => {
+  1102→                  (e.currentTarget as HTMLElement).style.transform = "";
+  1103→                  (e.currentTarget as HTMLElement).style.boxShadow = uploadedFile
+  1104→                    ? "5px 5px 0 #ff6b6b"
+  1105→                    : "none";
+  1106→                }}
+  1107→              >
+  1108→                {isExtracting ? (
+  1109→                  <>
+  1110→                    <div
+  1111→                      style={{
+  1112→                        width: 20,
+  1113→                        height: 20,
+  1114→                        border: "3px solid #ffe8a3",
+  1115→                        borderTopColor: "transparent",
+  1116→                        borderRadius: "50%",
+  1117→                        animation: "spin 0.7s linear infinite",
+  1118→                      }}
+  1119→                    />
+  1120→                    SEDANG MENGEKSTRAK...
+  1121→                  </>
+  1122→                ) : (
+  1123→                  <>
+  1124→                    <Zap
+  1125→                      size={22}
+  1126→                      fill={uploadedFile ? "#ffe8a3" : "#888"}
+  1127→                    />
+  1128→                    {extracted ? "EKSTRAK ULANG!" : "EKSTRAK KODE!"}
+  1129→                  </>
+  1130→                )}
+  1131→              </button>
+  1132→            </div>
+  1133→          </Card>
+  1134→
+  1135→          {/* COL 3: HASIL EKSTRAKSI */}
+  1136→          <Card>
+  1137→            <CardHeader bg="#f5f0ff">
+  1138→              <div style={{ display: "flex", gap: "5px" }}>
+  1139→                {["#ff6b6b", "#ffe8a3", "#d4f0e4"].map((c) => (
+  1140→                  <div
+  1141→                    key={c}
+  1142→                    style={{
+  1143→                      width: 11,
+  1144→                      height: 11,
+  1145→                      borderRadius: "50%",
+  1146→                      backgroundColor: c,
+  1147→                      border: "2px solid #000",
+  1148→                    }}
+  1149→                  />
+  1150→                ))}
+  1151→              </div>
+  1152→              <span
+  1153→                style={{
+  1154→                  fontFamily: "var(--font-display)",
+  1155→                  fontSize: "1.1rem",
+  1156→                  letterSpacing: "0.05em",
+  1157→                  flex: 1,
+  1158→                }}
+  1159→              >
+  1160→                HASIL EKSTRAKSI
+  1161→              </span>
+  1162→              <div
+  1163→                style={{
+  1164→                  backgroundColor: extracted
+  1165→                    ? "#d4f0e4"
+  1166→                    : extractError
+  1167→                      ? "#ffd6d6"
+  1168→                      : "#ffe8a3",
+  1169→                  border: "2px solid #000",
+  1170→                  borderRadius: "8px",
+  1171→                  padding: "2px 9px",
+  1172→                  fontSize: "0.68rem",
+  1173→                  fontWeight: 900,
+  1174→                  display: "flex",
+  1175→                  alignItems: "center",
+  1176→                  gap: "4px",
+  1177→                  fontFamily: "var(--font-body)",
+  1178→                }}
+  1179→              >
+  1180→                <span
+  1181→                  style={{
+  1182→                    width: 6,
+  1183→                    height: 6,
+  1184→                    borderRadius: "50%",
+  1185→                    backgroundColor: extracted
+  1186→                      ? "#00aa44"
+  1187→                      : extractError
+  1188→                        ? "#ff4444"
+  1189→                        : "#ffaa00",
+  1190→                    display: "inline-block",
+  1191→                  }}
+  1192→                />
+  1193→                {extracted
+  1194→                  ? `${extractedBlocks.length} BLOK`
+  1195→                  : extractError
+  1196→                    ? "GAGAL"
+  1197→                    : "MENUNGGU"}
+  1198→              </div>
+  1199→            </CardHeader>
+  1200→
+  1201→            {/* detected-language chips (multi-block switcher) */}
+  1202→            {detectedLangs.length > 1 && (
+  1203→              <div
+  1204→                style={{
+  1205→                  backgroundColor: "#fef9f0",
+  1206→                  borderBottom: "2px solid #000",
+  1207→                  padding: "8px 12px",
+  1208→                  display: "flex",
+  1209→                  flexWrap: "wrap",
+  1210→                  gap: "5px",
+  1211→                }}
+  1212→              >
+  1213→                {detectedLangs.map((id) => {
+  1214→                  const lang = LANGUAGES.find((l) => l.id === id);
+  1215→                  return (
+  1216→                    <LangChip
+  1217→                      key={id}
+  1218→                      lang={
+  1219→                        lang ?? {
+  1220→                          id,
+  1221→                          label: id,
+  1222→                          emoji: "📄",
+  1223→                          color: "#ffe8a3",
+  1224→                        }
+  1225→                      }
+  1226→                      active={id === selectedLang}
+  1227→                      onClick={() => setSelectedLang(id)}
+  1228→                    />
+  1229→                  );
+  1230→                })}
+  1231→              </div>
+  1232→            )}
+  1233→
+  1234→            <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+  1235→              <div
+  1236→                style={{
+  1237→                  backgroundColor: "#1a1a2e",
+  1238→                  height: "100%",
+  1239→                  overflowY: "auto",
+  1240→                  padding: "18px",
+  1241→                  fontFamily: "var(--font-mono)",
+  1242→                  fontSize: "0.78rem",
+  1243→                  lineHeight: 1.7,
+  1244→                  minHeight: "240px",
+  1245→                  maxHeight: "440px",
+  1246→                }}
+  1247→              >
+  1248→                {!extracted && !isExtracting && !extractError && (
+  1249→                  <div
+  1250→                    style={{
+  1251→                      display: "flex",
+  1252→                      flexDirection: "column",
+  1253→                      alignItems: "center",
+  1254→                      justifyContent: "center",
+  1255→                      height: "100%",
+  1256→                      gap: "12px",
+  1257→                      opacity: 0.45,
+  1258→                    }}
+  1259→                  >
+  1260→                    <p
+  1261→                      style={{
+  1262→                        fontFamily: "var(--font-display)",
+  1263→                        fontSize: "3rem",
+  1264→                        color: "#aaa",
+  1265→                        margin: 0,
+  1266→                      }}
+  1267→                    >
+  1268→                      ???
+  1269→                    </p>
+  1270→                    <p
+  1271→                      style={{
+  1272→                        color: "#888",
+  1273→                        fontWeight: 700,
+  1274→                        textAlign: "center",
+  1275→                        fontSize: "0.85rem",
+  1276→                        margin: 0,
+  1277→                      }}
+  1278→                    >
+  1279→                      Upload file &amp; klik EKSTRAK KODE! untuk memulai
+  1280→                    </p>
+  1281→                  </div>
+  1282→                )}
+  1283→                {extractError && !isExtracting && (
+  1284→                  <div
+  1285→                    style={{
+  1286→                      display: "flex",
+  1287→                      flexDirection: "column",
+  1288→                      alignItems: "center",
+  1289→                      justifyContent: "center",
+  1290→                      height: "100%",
+  1291→                      gap: "12px",
+  1292→                    }}
+  1293→                  >
+  1294→                    <p
+  1295→                      style={{
+  1296→                        fontFamily: "var(--font-display)",
+  1297→                        fontSize: "1.3rem",
+  1298→                        color: "#ff6b6b",
+  1299→                        textAlign: "center",
+  1300→                        margin: 0,
+  1301→                      }}
+  1302→                    >
+  1303→                      {extractError}
+  1304→                    </p>
+  1305→                  </div>
+  1306→                )}
+  1307→                {isExtracting && (
+  1308→                  <div
+  1309→                    style={{
+  1310→                      display: "flex",
+  1311→                      flexDirection: "column",
+  1312→                      alignItems: "center",
+  1313→                      justifyContent: "center",
+  1314→                      height: "100%",
+  1315→                      gap: "16px",
+  1316→                    }}
+  1317→                  >
+  1318→                    <p
+  1319→                      style={{
+  1320→                        fontFamily: "var(--font-display)",
+  1321→                        fontSize: "1.8rem",
+  1322→                        color: "#ffe8a3",
+  1323→                        animation:
+  1324→                          "pulse 0.8s ease-in-out infinite alternate",
+  1325→                        margin: 0,
+  1326→                        textAlign: "center",
+  1327→                      }}
+  1328→                    >
+  1329→                      MENGANALISIS FILE...
+  1330→                    </p>
+  1331→                    <div style={{ display: "flex", gap: "6px" }}>
+  1332→                      {[0, 1, 2, 3, 4].map((i) => (
+  1333→                        <div
+  1334→                          key={i}
+  1335→                          style={{
+  1336→                            width: 8,
+  1337→                            height: 8,
+  1338→                            backgroundColor: "#d4f0e4",
+  1339→                            borderRadius: "50%",
+  1340→                            animation: `bounce 0.6s ease-in-out ${i * 0.1}s infinite alternate`,
+  1341→                          }}
+  1342→                        />
+  1343→                      ))}
+  1344→                    </div>
+  1345→                  </div>
+  1346→                )}
+  1347→                {(extracted ||
+  1348→                  (!extracted && !isExtracting && !extractError)) &&
+  1349→                  !isExtracting && (
+  1350→                    <pre
+  1351→                      style={{
+  1352→                        margin: 0,
+  1353→                        whiteSpace: "pre-wrap",
+  1354→                        wordBreak: "break-word",
+  1355→                        color: "#e8f4fd",
+  1356→                      }}
+  1357→                    >
+  1358→                      <code>{extracted ? displayCode : ""}</code>
+  1359→                    </pre>
+  1360→                  )}
+  1361→              </div>
+  1362→
+  1363→              {/* extraction meta badge */}
+  1364→              {extractMeta.method && (
+  1365→                <div
+  1366→                  style={{
+  1367→                    position: "absolute",
+  1368→                    top: 14,
+  1369→                    left: 14,
+  1370→                    backgroundColor: "rgba(0,0,0,0.6)",
+  1371→                    color: "#ffe8a3",
+  1372→                    border: "1px solid #ffe8a3",
+  1373→                    borderRadius: "6px",
+  1374→                    padding: "2px 8px",
+  1375→                    fontSize: "0.65rem",
+  1376→                    fontWeight: 800,
+  1377→                    fontFamily: "var(--font-mono)",
+  1378→                    zIndex: 5,
+  1379→                  }}
+  1380→                >
+  1381→                  {extractMeta.method}
+  1382→                  {extractMeta.durationMs
+  1383→                    ? ` · ${extractMeta.durationMs}ms`
+  1384→                    : ""}
+  1385→                  {extractMeta.cached ? " · cached" : ""}
+  1386→                </div>
+  1387→              )}
+  1388→
+  1389→              {/* action buttons */}
+  1390→              {extracted && (
+  1391→                <div
+  1392→                  style={{
+  1393→                    position: "absolute",
+  1394→                    bottom: 14,
+  1395→                    right: 14,
+  1396→                    display: "flex",
+  1397→                    gap: "8px",
+  1398→                    zIndex: 10,
+  1399→                    flexWrap: "wrap",
+  1400→                    justifyContent: "flex-end",
+  1401→                  }}
+  1402→                >
+  1403→                  {savedSnippetId ? (
+  1404→                    <button
+  1405→                      onClick={handleSave}
+  1406→                      title="Snippet ini sudah tersimpan — klik untuk simpan ulang"
+  1407→                      style={{
+  1408→                        backgroundColor: "#d4f0e4",
+  1409→                        border: "3px solid #000",
+  1410→                        borderRadius: "999px",
+  1411→                        padding: "10px 14px",
+  1412→                        fontFamily: "var(--font-display)",
+  1413→                        fontSize: "0.9rem",
+  1414→                        letterSpacing: "0.05em",
+  1415→                        cursor: "pointer",
+  1416→                        boxShadow: "4px 4px 0 #000",
+  1417→                        display: "flex",
+  1418→                        alignItems: "center",
+  1419→                        gap: "5px",
+  1420→                      }}
+  1421→                    >
+  1422→                      <Check size={14} strokeWidth={3} /> Tersimpan! Simpan Ulang
+  1423→                    </button>
+  1424→                  ) : (
+  1425→                    <button
+  1426→                      onClick={handleSave}
+  1427→                      disabled={saving}
+  1428→                      title="Simpan snippet"
+  1429→                      style={{
+  1430→                        backgroundColor: "#f5f0ff",
+  1431→                        border: "3px solid #000",
+  1432→                        borderRadius: "999px",
+  1433→                        padding: "10px 14px",
+  1434→                        fontFamily: "var(--font-display)",
+  1435→                        fontSize: "0.9rem",
+  1436→                        letterSpacing: "0.05em",
+  1437→                        cursor: saving ? "not-allowed" : "pointer",
+  1438→                        boxShadow: "4px 4px 0 #000",
+  1439→                        display: "flex",
+  1440→                        alignItems: "center",
+  1441→                        gap: "5px",
+  1442→                        opacity: saving ? 0.6 : 1,
+  1443→                      }}
+  1444→                    >
+  1445→                      {saving ? (
+  1446→                        "⏳..."
+  1447→                      ) : (
+  1448→                        <>
+  1449→                          <Save size={14} /> Simpan
+  1450→                        </>
+  1451→                      )}
+  1452→                    </button>
+  1453→                  )}
+  1454→                  <button
+  1455→                    onClick={handleDownload}
+  1456→                    style={{
+  1457→                      backgroundColor: "#d4f0e4",
+  1458→                      border: "3px solid #000",
+  1459→                      borderRadius: "999px",
+  1460→                      padding: "10px 14px",
+  1461→                      fontFamily: "var(--font-display)",
+  1462→                      fontSize: "0.9rem",
+  1463→                      letterSpacing: "0.05em",
+  1464→                      cursor: "pointer",
+  1465→                      boxShadow: "4px 4px 0 #000",
+  1466→                      display: "flex",
+  1467→                      alignItems: "center",
+  1468→                      gap: "5px",
+  1469→                      transition: "all 0.15s",
+  1470→                    }}
+  1471→                    onMouseEnter={(e) => {
+  1472→                      (e.currentTarget as HTMLElement).style.transform =
+  1473→                        "translate(2px,2px)";
+  1474→                      (e.currentTarget as HTMLElement).style.boxShadow =
+  1475→                        "2px 2px 0 #000";
+  1476→                    }}
+  1477→                    onMouseLeave={(e) => {
+  1478→                      (e.currentTarget as HTMLElement).style.transform = "";
+  1479→                      (e.currentTarget as HTMLElement).style.boxShadow =
+  1480→                        "4px 4px 0 #000";
+  1481→                    }}
+  1482→                  >
+  1483→                    ⬇ .{currentLang?.ext ?? "txt"}
+  1484→                  </button>
+  1485→                  <button
+  1486→                    onClick={handleCopy}
+  1487→                    style={{
+  1488→                      backgroundColor: copied ? "#d4f0e4" : "#ff6b6b",
+  1489→                      border: "3px solid #000",
+  1490→                      borderRadius: "999px",
+  1491→                      padding: "10px 18px",
+  1492→                      fontFamily: "var(--font-display)",
+  1493→                      fontSize: "0.9rem",
+  1494→                      letterSpacing: "0.06em",
+  1495→                      cursor: "pointer",
+  1496→                      boxShadow: copied ? "2px 2px 0 #000" : "5px 5px 0 #000",
+  1497→                      transform: copied ? "translate(3px,3px)" : "",
+  1498→                      transition: "all 0.15s",
+  1499→                      display: "flex",
+  1500→                      alignItems: "center",
+  1501→                      gap: "6px",
+  1502→                    }}
+  1503→                    onMouseEnter={(e) => {
+  1504→                      if (!copied) {
+  1505→                        (e.currentTarget as HTMLElement).style.transform =
+  1506→                          "translate(2px,2px)";
+  1507→                        (e.currentTarget as HTMLElement).style.boxShadow =
+  1508→                          "3px 3px 0 #000";
+  1509→                      }
+  1510→                    }}
+  1511→                    onMouseLeave={(e) => {
+  1512→                      if (!copied) {
+  1513→                        (e.currentTarget as HTMLElement).style.transform = "";
+  1514→                        (e.currentTarget as HTMLElement).style.boxShadow =
+  1515→                          "5px 5px 0 #000";
+  1516→                      }
+  1517→                    }}
+  1518→                  >
+  1519→                    {copied ? (
+  1520→                      <Check size={14} strokeWidth={3} />
+  1521→                    ) : (
+  1522→                      <Copy size={14} />
+  1523→                    )}
+  1524→                    {copied ? "TERSALIN!" : "BOOM! Salin Kode"}
+  1525→                  </button>
+  1526→                </div>
+  1527→              )}
+  1528→            </div>
+  1529→
+  1530→            {extracted && activeBlock && (
+  1531→              <div
+  1532→                style={{
+  1533→                  backgroundColor: "#ffe0d0",
+  1534→                  borderTop: "3px solid #000",
+  1535→                  padding: "7px 16px",
+  1536→                  display: "flex",
+  1537→                  alignItems: "center",
+  1538→                  justifyContent: "space-between",
+  1539→                  flexShrink: 0,
+  1540→                  fontFamily: "var(--font-body)",
+  1541→                }}
+  1542→              >
+  1543→                <span style={{ fontSize: "0.7rem", fontWeight: 900 }}>
+  1544→                  {currentLang?.emoji} {currentLang?.label} ·{" "}
+  1545→                  {activeBlock.lines} baris
+  1546→                </span>
+  1547→                <span
+  1548→                  style={{
+  1549→                    fontSize: "0.7rem",
+  1550→                    fontWeight: 900,
+  1551→                    color: "#555",
+  1552→                  }}
+  1553→                >
+  1554→                  {new Date().toLocaleDateString("id-ID", {
+  1555→                    day: "numeric",
+  1556→                    month: "short",
+  1557→                    year: "numeric",
+  1558→                  })}
+  1559→                </span>
+  1560→              </div>
+  1561→            )}
+  1562→          </Card>
+  1563→        </div>
+  1564→
+  1565→        {/* ══ SNIPPET TERSIMPAN ══ */}
+  1566→        <div
+  1567→          style={{
+  1568→            marginTop: "16px",
+  1569→            backgroundColor: "#fff",
+  1570→            border: "3px solid #000",
+  1571→            borderRadius: "16px",
+  1572→            boxShadow: "5px 5px 0 #000",
+  1573→            overflow: "hidden",
+  1574→          }}
+  1575→        >
+  1576→          <div
+  1577→            style={{
+  1578→              backgroundColor: "#ffe0d0",
+  1579→              borderBottom: "3px solid #000",
+  1580→              padding: "11px 16px",
+  1581→              display: "flex",
+  1582→              alignItems: "center",
+  1583→              gap: "8px",
+  1584→              flexWrap: "wrap",
+  1585→            }}
+  1586→          >
+  1587→            <FolderOpen size={16} />
+  1588→            <span
+  1589→              style={{
+  1590→                fontFamily: "var(--font-display)",
+  1591→                fontSize: "1.15rem",
+  1592→                letterSpacing: "0.05em",
+  1593→              }}
+  1594→            >
+  1595→              📂 SNIPPET TERSIMPAN
+  1596→            </span>
+  1597→            <Tag bg="#000" color="#ffe0d0">
+  1598→              {snippets.length} SNIPPET
+  1599→            </Tag>
+  1600→            <button
+  1601→              onClick={() => void refreshSnippets()}
+  1602→              title="Refresh list"
+  1603→              style={{
+  1604→                marginLeft: "auto",
+  1605→                backgroundColor: "#ffe8a3",
+  1606→                border: "2px solid #000",
+  1607→                borderRadius: "8px",
+  1608→                padding: "5px 10px",
+  1609→                fontSize: "0.75rem",
+  1610→                fontWeight: 900,
+  1611→                cursor: "pointer",
+  1612→                fontFamily: "var(--font-body)",
+  1613→                display: "flex",
+  1614→                alignItems: "center",
+  1615→                gap: "4px",
+  1616→              }}
+  1617→            >
+  1618→              ⟳ Refresh
+  1619→            </button>
+  1620→          </div>
+  1621→
+  1622→          <div
+  1623→            style={{
+  1624→              padding: "14px",
+  1625→              backgroundColor: "#fef9f0",
+  1626→              maxHeight: "320px",
+  1627→              overflowY: "auto",
+  1628→            }}
+  1629→          >
+  1630→            {loadingSnippets ? (
+  1631→              <div
+  1632→                style={{
+  1633→                  textAlign: "center",
+  1634→                  padding: "24px",
+  1635→                  color: "#777",
+  1636→                  fontWeight: 800,
+  1637→                  fontSize: "0.85rem",
+  1638→                }}
+  1639→              >
+  1640→                <div
+  1641→                  style={{
+  1642→                    width: 22,
+  1643→                    height: 22,
+  1644→                    border: "3px solid #000",
+  1645→                    borderTopColor: "transparent",
+  1646→                    borderRadius: "50%",
+  1647→                    margin: "0 auto 10px",
+  1648→                    animation: "spin 0.7s linear infinite",
+  1649→                  }}
+  1650→                />
+  1651→                Memuat snippet...
+  1652→              </div>
+  1653→            ) : snippets.length === 0 ? (
+  1654→              <div
+  1655→                style={{
+  1656→                  textAlign: "center",
+  1657→                  padding: "24px",
+  1658→                }}
+  1659→              >
+  1660→                <p
+  1661→                  style={{
+  1662→                    fontFamily: "var(--font-display)",
+  1663→                    fontSize: "1.4rem",
+  1664→                    letterSpacing: "0.04em",
+  1665→                    margin: "0 0 6px 0",
+  1666→                  }}
+  1667→                >
+  1668→                  📭 Belum ada snippet
+  1669→                </p>
+  1670→                <p
+  1671→                  style={{
+  1672→                    fontSize: "0.85rem",
+  1673→                    fontWeight: 700,
+  1674→                    color: "#555",
+  1675→                    margin: 0,
+  1676→                    fontFamily: "var(--font-body)",
+  1677→                  }}
+  1678→                >
+  1679→                  Ekstrak kode dari file, lalu klik{" "}
+  1680→                  <strong>Simpan</strong> untuk menyimpannya di sini.
+  1681→                </p>
+  1682→              </div>
+  1683→            ) : (
+  1684→              <div
+  1685→                style={{
+  1686→                  display: "grid",
+  1687→                  gridTemplateColumns:
+  1688→                    "repeat(auto-fill, minmax(min(100%, 280px), 1fr))",
+  1689→                  gap: "10px",
+  1690→                }}
+  1691→              >
+  1692→                {snippets.map((s) => {
+  1693→                  const lang = LANGUAGES.find(
+  1694→                    (l) => l.id === s.extractedLang,
+  1695→                  );
+  1696→                  return (
+  1697→                    <div
+  1698→                      key={s.id}
+  1699→                      style={{
+  1700→                        backgroundColor: "#fff",
+  1701→                        border: "2px solid #000",
+  1702→                        borderRadius: "10px",
+  1703→                        padding: "10px 12px",
+  1704→                        boxShadow: "3px 3px 0 #000",
+  1705→                        display: "flex",
+  1706→                        flexDirection: "column",
+  1707→                        gap: "6px",
+  1708→                      }}
+  1709→                    >
+  1710→                      <div
+  1711→                        style={{
+  1712→                          display: "flex",
+  1713→                          alignItems: "center",
+  1714→                          gap: "6px",
+  1715→                        }}
+  1716→                      >
+  1717→                        <div
+  1718→                          style={{
+  1719→                            width: 28,
+  1720→                            height: 28,
+  1721→                            backgroundColor: lang?.color ?? "#ffe8a3",
+  1722→                            border: "2px solid #000",
+  1723→                            borderRadius: "6px",
+  1724→                            display: "flex",
+  1725→                            alignItems: "center",
+  1726→                            justifyContent: "center",
+  1727→                            fontSize: "0.9rem",
+  1728→                            flexShrink: 0,
+  1729→                          }}
+  1730→                        >
+  1731→                          {lang?.emoji ?? "📄"}
+  1732→                        </div>
+  1733→                        <p
+  1734→                          style={{
+  1735→                            fontSize: "0.82rem",
+  1736→                            fontWeight: 900,
+  1737→                            margin: 0,
+  1738→                            overflow: "hidden",
+  1739→                            textOverflow: "ellipsis",
+  1740→                            whiteSpace: "nowrap",
+  1741→                            flex: 1,
+  1742→                            minWidth: 0,
+  1743→                          }}
+  1744→                          title={s.originalFilename}
+  1745→                        >
+  1746→                          {s.originalFilename}
+  1747→                        </p>
+  1748→                      </div>
+  1749→                      <div
+  1750→                        style={{
+  1751→                          display: "flex",
+  1752→                          gap: "5px",
+  1753→                          flexWrap: "wrap",
+  1754→                        }}
+  1755→                      >
+  1756→                        <Tag bg="#d4f0e4">
+  1757→                          {s.totalBlocks} blok
+  1758→                        </Tag>
+  1759→                        <Tag bg="#f5f0ff">
+  1760→                          {(s.fileSize / 1024).toFixed(1)} KB
+  1761→                        </Tag>
+  1762→                        {s.tags && s.tags.trim() && (
+  1763→                          <Tag bg="#ffe8a3">
+  1764→                            🏷 {s.tags.split(",")[0]?.trim()}
+  1765→                          </Tag>
+  1766→                        )}
+  1767→                      </div>
+  1768→                      <div
+  1769→                        style={{
+  1770→                          display: "flex",
+  1771→                          alignItems: "center",
+  1772→                          justifyContent: "space-between",
+  1773→                          marginTop: "2px",
+  1774→                        }}
+  1775→                      >
+  1776→                        <span
+  1777→                          style={{
+  1778→                            fontSize: "0.66rem",
+  1779→                            fontWeight: 800,
+  1780→                            color: "#666",
+  1781→                          }}
+  1782→                        >
+  1783→                          {new Date(s.createdAt).toLocaleDateString("id-ID", {
+  1784→                            day: "numeric",
+  1785→                            month: "short",
+  1786→                            year: "numeric",
+  1787→                          })}
+  1788→                        </span>
+  1789→                        <div style={{ display: "flex", gap: "5px" }}>
+  1790→                          <button
+  1791→                            onClick={() => void handleLoadSnippet(s)}
+  1792→                            title="Muat snippet ini ke panel hasil"
+  1793→                            style={{
+  1794→                              backgroundColor: "#000",
+  1795→                              color: "#ffe8a3",
+  1796→                              border: "2px solid #000",
+  1797→                              borderRadius: "6px",
+  1798→                              padding: "4px 9px",
+  1799→                              fontSize: "0.72rem",
+  1800→                              fontWeight: 900,
+  1801→                              cursor: "pointer",
+  1802→                              fontFamily: "var(--font-body)",
+  1803→                              display: "flex",
+  1804→                              alignItems: "center",
+  1805→                              gap: "3px",
+  1806→                            }}
+  1807→                          >
+  1808→                            <FolderOpen size={11} /> Muat
+  1809→                          </button>
+  1810→                          <button
+  1811→                            onClick={() => void handleDeleteSnippet(s)}
+  1812→                            title="Hapus snippet"
+  1813→                            style={{
+  1814→                              backgroundColor: "#ff6b6b",
+  1815→                              color: "#fff",
+  1816→                              border: "2px solid #000",
+  1817→                              borderRadius: "6px",
+  1818→                              padding: "4px 7px",
+  1819→                              fontSize: "0.72rem",
+  1820→                              fontWeight: 900,
+  1821→                              cursor: "pointer",
+  1822→                              display: "flex",
+  1823→                              alignItems: "center",
+  1824→                            }}
+  1825→                          >
+  1826→                            <Trash2 size={11} />
+  1827→                          </button>
+  1828→                        </div>
+  1829→                      </div>
+  1830→                    </div>
+  1831→                  );
+  1832→                })}
+  1833→              </div>
+  1834→            )}
+  1835→          </div>
+  1836→        </div>
+  1837→
+  1838→        {/* hidden file input shared with header button */}
+  1839→        <input
+  1840→          ref={fileInputRef}
+  1841→          type="file"
+  1842→          accept=".pdf,.doc,.docx,.pptx,.ppt,.xlsx,.xls,.txt,.md,.html,.ipynb,.tex"
+  1843→          onChange={handleFileInput}
+  1844→          style={{ display: "none" }}
+  1845→        />
+  1846→      </main>
+  1847→
+  1848→      {/* ══ FOOTER ══ */}
+  1849→      <footer
+  1850→        style={{
+  1851→          backgroundColor: "#ffe8a3",
+  1852→          borderTop: "3px solid #000",
+  1853→          boxShadow: "0 -5px 0 #000",
+  1854→          padding: "10px 16px",
+  1855→          marginTop: "auto",
+  1856→          textAlign: "center",
+  1857→          fontFamily: "var(--font-body)",
+  1858→        }}
+  1859→      >
+  1860→        <p
+  1861→          style={{
+  1862→            margin: 0,
+  1863→            fontFamily: "var(--font-display)",
+  1864→            fontSize: "0.95rem",
+  1865→            letterSpacing: "0.04em",
+  1866→          }}
+  1867→        >
+  1868→          CodeLooter! · Ekstrak kode dari dokumen ·{" "}
+  1869→          <span style={{ color: "#ff6b6b" }}>BETA</span>
+  1870→        </p>
+  1871→      </footer>
+  1872→    </div>
+  1873→  );
+  1874→}
+  1875→
