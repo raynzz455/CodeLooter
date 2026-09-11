@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { LANGUAGES, STATS, SAMPLE_CODES } from "@/components/codelooter/data";
+import { SplashScreen, useShouldShowSplash } from "@/components/codelooter/splash-screen";
 import {
   extractFile,
   saveSnippet,
@@ -169,6 +170,10 @@ function LangChip({
 
 // ─── Main page ───
 export default function Home() {
+  // Splash screen — shows once per hour (cookie-controlled).
+  const showSplash = useShouldShowSplash();
+  const [splashDone, setSplashDone] = useState(false);
+
   // Language picker state.
   const [selectedLang, setSelectedLang] = useState<string>("r");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -426,6 +431,11 @@ export default function Home() {
         flexDirection: "column",
       }}
     >
+      {/* ══ SPLASH SCREEN ══ */}
+      {showSplash && !splashDone && (
+        <SplashScreen onDone={() => setSplashDone(true)} />
+      )}
+
       {/* ══ HEADER ══ */}
       <header
         style={{
@@ -456,16 +466,21 @@ export default function Home() {
               height: 40,
               border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: "10px",
-              backgroundColor: "#c9a0a0",
-              boxShadow: "0 2px 8px rgba(201,160,160,0.25)",
+              overflow: "hidden",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
               flexShrink: 0,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               color: "#fff",
+              backgroundColor: "#c9a0a0",
             }}
           >
-            <Code2 size={22} strokeWidth={2} />
+            <img
+              src="/logo.jpg"
+              alt="CodeLooter logo"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
           </div>
           <h1
             style={{

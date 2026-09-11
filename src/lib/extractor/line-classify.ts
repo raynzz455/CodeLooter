@@ -164,8 +164,6 @@ export const CODE_START_PATTERNS: RegExp[] = [
   /^\s*package\s+(main|\w+)\s*$/,
   // NEW: C/C++ #include
   /^\s*#include\s+[<"]/,
-  // NEW: Python import statement
-  /^\s*(import|from)\s+\w/,
 ];
 
 export const CODE_END_PATTERNS: RegExp[] = [
@@ -336,7 +334,23 @@ export function isCodeLine(line: string): boolean {
   if (/^\s*(if|elif|while|for|else)\s.*:\s*$/.test(t)) return true;
   if (/^\s*else\s*:/.test(t)) return true;
   if (/^\s*elif\s+/.test(t)) return true;
-  if (/^\s*#\s/.test(t)) return true;
+  if (/^\s*#\s/.test(t)) {
+    // Don't treat markdown headings (title-case # Title) as code comments.
+    // A code comment like `# load data` is lowercase; a heading like
+    // `# Membuat Aplikasi Android` is title-case.
+    // But `# Kasus 1: Uji Chi-Square` IS a code comment (has `:` and number).
+    const content = t.replace(/^\s*#\s+/, "");
+    // If the comment contains a colon, comma, or equals — it's likely a code comment
+    // (section labels like "# Kasus 1:", "# Referensi: Smith 2017")
+    if (/[:=,]/.test(content)) return true;
+    const words = content.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
+    if (words.length >= 2) {
+      const capitalized = words.filter(w => /^[A-Z]/.test(w)).length;
+      // If >60% of words are capitalized AND no numbers, it's a markdown heading.
+      if (capitalized / words.length >= 0.6 && !/\d/.test(content)) return false;
+    }
+    return true;
+  }
   if (/^\s{4,}\w+/.test(t) && /[()=<>+\-*/]/.test(t) && !t.endsWith(".") && !t.endsWith(":")) {
     if (proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
   }

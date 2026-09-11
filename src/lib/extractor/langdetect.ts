@@ -628,6 +628,133 @@ function isCssBlock(code: string): boolean {
   return cssHits >= 2;
 }
 
+// ─── Custom detection helpers (ported from Python language_detection.py) ───
+// These functions provide more accurate detection for short snippets by
+// combining multiple weak signals into a strong decision.
+
+// R-specific patterns that pygments/highlight.js often miss
+const R_PATTERNS_PY: RegExp[] = [
+  /\b\w+\s*<-\s/,
+  /\bcat\s*\(/,
+  /\bqt\s*\(/,
+  /\bqnorm\s*\(/,
+  /\bqf\s*\(/,
+  /\bqchisq\s*\(/,
+  /\bqlnorm\s*\(/,
+  /\bqbeta\s*\(/,
+  /\blibrary\s*\(/,
+  /\brequire\s*\(/,
+  /\bread\.\w+\s*\(/,
+  /\bdata\.frame\s*\(/,
+  /\bggplot\s*\(/,
+  /\bsummary\s*\(/,
+  /\bhead\s*\(/,
+  /\bstr\s*\(/,
+  /\bsetwd\s*\(/,
+  /\bset\.seed\s*\(/,
+  /\bsample\s*\(/,
+  /\b\w+\$[\w.]+/,
+  /%>%/,
+  /%<-%/,
+  /%<>%/,
+  /\bseq\s*\(/,
+  /\brep\s*\(/,
+  /\bsapply\s*\(/,
+  /\blapply\s*\(/,
+  /\bapply\s*\(/,
+  /\bmapply\s*\(/,
+  /\bvapply\s*\(/,
+  /\bstop\s*\(/,
+  /\bwarning\s*\(/,
+  /\bmessage\s*\(/,
+];
+
+const SQL_KEYWORDS_RE = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION|VALUES|SET|TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER|PRIMARY|FOREIGN|REFERENCES|CONSTRAINT|DEFAULT|NOT\s+NULL|AUTO_INCREMENT|SERIAL|CASCADE)\b/i;
+
+const PHP_PATTERNS_PY: RegExp[] = [
+  /<\?php/,
+  /<\?=/,
+  /\$\w+/,
+  /\becho\s+\$/,
+  /\bprint\s*\(/,
+  /\bfunction\s+\w+\s*\([^)]*\$/,
+  /\bclass\s+\w+\s*\{?[^}]*\$this->/,
+];
+
+const JAVA_PATTERNS_PY: RegExp[] = [
+  /\bpublic\s+class\s+\w+/,
+  /\bpublic\s+static\s+void\s+main\s*\(/,
+  /\bSystem\.out\.print/,
+  /\bimport\s+java\./,
+  /\bprivate\s+\w+\s+\w+\s*[;=]/,
+  /\bprotected\s+\w+\s+\w+\s*[;=]/,
+  /\bextends\s+\w+/,
+  /\bimplements\s+\w+/,
+  /\bthrows\s+\w+/,
+  /\bnew\s+\w+\s*\(/,
+];
+
+function detectR(code: string): boolean {
+  const hits = R_PATTERNS_PY.filter(p => p.test(code)).length;
+  const strongR = /\b(cat|qt|qnorm|qf|qchisq|qlnorm|qbeta|setwd|set\.seed|sapply|lapply|vapply|mapply)\s*\(/.test(code);
+  const assignR = /\b\w+\s*<-/.test(code);
+  const pipeR = /%>%|%<>%|%<-%/.test(code);
+  const libR = /\blibrary\s*\(/.test(code);
+
+  if ((strongR || pipeR || libR) && assignR) return true;
+  if (assignR && hits >= 3) return true;
+  if (hits >= 4) return true;
+
+  // R-specific function calls (without <- assignment)
+  const rStrongFunction = /\b(chisq\.test|cor\.test|t\.test|aov|glm|data\.frame|read\.csv|read\.table|read\.xlsx|cbind|rbind|row\.names|col\.names|row\.sums|col\.sums|apply|sapply|lapply|vapply|mapply|set\.seed|qt|qnorm|qf|qchisq|pt|pnorm|pf|pchisq|dt|dnorm|df|dchisq)\s*\(/.test(code);
+  const rDollarNotation = /\b\w+\$\w+/.test(code);
+  const rStringPaste = /\bpaste0?\s*\(/.test(code);
+  const rMethodArg = /method\s*=\s*c\s*\(/.test(code);
+
+  if (rStrongFunction) return true;
+  if (rStrongFunction && (rDollarNotation || rStringPaste || rMethodArg)) return true;
+  if (rDollarNotation && (rStringPaste || rMethodArg)) return true;
+  return false;
+}
+
+function detectSql(code: string): boolean {
+  const matches = code.match(new RegExp(SQL_KEYWORDS_RE.source, "gi"));
+  if (!matches) return false;
+  const uniqueKeywords = new Set(matches.map(m => m.toUpperCase()));
+  return uniqueKeywords.size >= 2;
+}
+
+function detectBash(code: string): boolean {
+  if (/^#!\s*\/(?:usr\/)?bin\/(?:bash|sh|zsh|ksh)/m.test(code)) return true;
+  const bashPatterns = [
+    /\b(if|then|fi|for|do|done|while|case|esac)\b/,
+    /\$\{\w+\}/,
+    /\$\(\([^)]+\)\)/,
+    /^\s*(?:export|alias|source|chmod|chown|cd|mkdir|rm|cp|mv)\s/m,
+  ];
+  const hits = bashPatterns.filter(p => p.test(code)).length;
+  return hits >= 2;
+}
+
+function detectPhp(code: string): boolean {
+  // If it's bash, skip PHP detection
+  if (detectBash(code)) return false;
+  const phpHits = PHP_PATTERNS_PY.filter(p => p.test(code)).length;
+  return phpHits >= 2 || /<\?php/.test(code);
+}
+
+function detectJava(code: string): boolean {
+  const javaHits = JAVA_PATTERNS_PY.filter(p => p.test(code)).length;
+  const hasCppMarker = /#include\s*[<"]/.test(code) || /\bstd::/.test(code);
+  return javaHits >= 2 && !hasCppMarker;
+}
+
+function detectRuby(code: string): boolean {
+  if (/^\s*def\s+\w+/m.test(code) && /^\s*end\s*$/m.test(code)) return true;
+  if (/\bputs\s+/.test(code) && /#\{\w+\}/.test(code)) return true;
+  return false;
+}
+
 export function detectLanguage(code: string): string {
   // Fast path: PHP detection (must check BEFORE HTML because PHP embeds HTML)
   if (/<\?php|<\?=/.test(code)) return "php";
@@ -658,6 +785,59 @@ export function detectLanguage(code: string): string {
     const cssHits = countMatches(code, CSS_SIGNALS);
     if (cssHits > htmlHits) return "css";
   }
+
+  // ── Custom detection (ported from Python backend/app/language_detection.py) ──
+  // This is more accurate than pure regex scoring for short snippets.
+
+  // 1. R detection — strong patterns
+  if (detectR(code)) return "r";
+  // 2. SQL detection — 2+ unique SQL keywords
+  if (detectSql(code)) return "sql";
+  // 3. Bash detection — shebang + bash keywords
+  if (detectBash(code)) return "bash";
+  // 4. PHP detection — must come before bash (PHP can have shell-like patterns)
+  if (detectPhp(code)) return "php";
+  // 5. Java detection (distinguish from C++)
+  if (detectJava(code)) return "java";
+  // 6. Ruby detection — def...end pattern
+  if (detectRuby(code)) return "ruby";
+  // 7. Go — package + func
+  if (/^\s*package\s+\w+\s*$/m.test(code) ||
+      (/\bfunc\s+\w+\s*\(/.test(code) && /\bpackage\s+\w+/.test(code))) return "go";
+  // 8. Rust — fn + let mut or println!
+  if ((/\bfn\s+\w+\s*\(/.test(code) && /\blet\s+mut\s+\w+|println!/.test(code)) ||
+      /println!/.test(code) || /\bpub\s+fn\s+/.test(code)) return "rust";
+  // 9. Kotlin — fun + listOf/arrayOf/when (must be before Python `def`)
+  if (/\bfun\s+\w+\s*\(/.test(code)) return "kotlin";
+  if (/\bval\s+\w+\s*[=:]/.test(code) &&
+      /\blistOf\(|\barrayOf\(|\bmutableListOf\(|\bsetOf\(|\bmapOf\(/.test(code)) return "kotlin";
+  if (/\bwhen\s*\(/.test(code)) return "kotlin";
+  // 10. TypeScript — type annotations
+  if (/:\s*(string|number|boolean|any|void|never|unknown)\b/.test(code)) return "typescript";
+  if (/\binterface\s+\w+\s*\{/.test(code)) return "typescript";
+  if (/\btype\s+\w+\s*=/.test(code) && /\b(string|number|boolean|any)\b/.test(code)) return "typescript";
+  // Generic type usage like `Map<K,V>` or `Array<T>` — but NOT C++ `vector<T>` or `template <T>`
+  // Require both a type keyword AND a generic syntax to avoid C++ false positives.
+  if (/\b(Array|Map|Set|Promise|Record|Partial|Readonly|Pick|Omit)<[^>]+>/.test(code)) return "typescript";
+  if (/function\s+\w+\s*\([^)]*\)\s*:\s*\w+/.test(code)) return "typescript";
+  if (/const\s+\w+\s*:\s*\w+\s*=/.test(code)) return "typescript";
+  // 11. C++ — #include or std::
+  if (/#include\s*[<"]/.test(code) || /\bstd::/.test(code)) return "cpp";
+  if (/\bcout\s*<<|\bcin\s*>>/.test(code)) return "cpp";
+  // 12. C — int main() without std::
+  if (/\bint\s+main\s*\([^)]*\)\s*\{/.test(code) &&
+      !/\bstd::/.test(code) && !/#include/.test(code)) return "c";
+  // 13. Python — def, import, from, class with colon
+  if (/^\s*def\s+\w+\s*\([^)]*\)\s*:/m.test(code)) return "python";
+  if (/^\s*(import\s+\w+|from\s+\w+\s+import\s+)/m.test(code)) return "python";
+  if (/\bprint\s*\(/.test(code) && !/\bSystem\.out|\bconsole\.log|\bcout\s*<</.test(code)) {
+    if (!/<-|library\(/.test(code)) return "python";
+  }
+  // 14. JavaScript — const, let, var, function, console.log
+  if (/\bconsole\.log\s*\(/.test(code)) return "javascript";
+  if (/^\s*(?:const|let|var)\s+\w+\s*=/m.test(code)) return "javascript";
+  if (/^\s*function\s+\w+\s*\(/m.test(code)) return "javascript";
+  if (/=>\s*[\({\w]/.test(code)) return "javascript";
 
   // Score each language
   const scores: { lang: string; score: number }[] = [];

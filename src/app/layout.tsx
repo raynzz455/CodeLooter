@@ -24,7 +24,9 @@ export const metadata: Metadata = {
     "Ambil semua kode dari PDF, DOCX, Markdown, IPYNB secara instan. Minimalism pastel classic code extraction.",
   keywords: ["code extractor", "pdf to code", "ekstrak kode", "CodeLooter"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+    shortcut: "/logo.jpg",
   },
 };
 
