@@ -26,6 +26,7 @@ import {
 import { detectLanguage } from "./langdetect";
 import { repairLineWraps, normalizeWhitespace, stripROutputLines } from "./repair";
 import { mergeFragmentedBlocks, type CandidateBlock } from "./merge";
+import { validateCodeBlock, validateLine } from "./hljs-validator";
 
 export interface PatternExtractStats {
   rawBlocks: number;
@@ -356,21 +357,117 @@ export function extractCodeBlocksFromText(
   });
   stats.mergedBlocks = mergeStats.mergedCount;
 
-  // ── Phase 1 Fix #4: consistent R-output stripping ──
+  // ── Phase 1 Fix #4: consistent R-output stripping + hljs validation ──
   const finalBlocks: RawBlock[] = [];
   for (const b of merged) {
     const { code, stripped } = stripROutput(b.code);
     stats.strippedROutput += stripped;
     if (code.length >= 10 && code.split("\n").length >= 1) {
-      finalBlocks.push({
-        code,
-        lang: detectLanguage(code),
+      // Layer 2: Validate with highlight.js — is this really code?
+      const validation = validateCodeBlock(code);
+      if (validation.isCode) {
+        finalBlocks.push({
+          code,
+          lang: detectLanguage(code),
+          lines: code.split("\n").length,
+          source: b.source,
+          page: b.page,
+        });
+      } else {
+        // Low relevance — might be narrative that leaked through.
+        // Only keep if the block has strong R signals (our own detection).
+        const rHits = (code.match(/<-/g) || []).length +
+                      (code.match(/library\s*\(/g) || []).length +
+                      (code.match(/\bprint\s*\(/g) || []).length;
+        if (rHits >= 2) {
+          finalBlocks.push({
+            code,
+            lang: detectLanguage(code),
+            lines: code.split("\n").length,
+            source: b.source,
+            page: b.page,
+          });
+        } else {
+          stats.filteredNarasi++;
+        }
+      }
+    }
+  }
+
+  // ── Layer 3: hljs screening for ambiguous lines ──
+  // Check removed lines — if hljs says they're code, add them back.
+  const capturedLines = new Set<string>();
+  for (const b of finalBlocks) {
+    for (const l of b.code.split("\n")) capturedLines.add(l.trim());
+  }
+  const recovered: CandidateBlock[] = [];
+  let recoveryCurrent: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t || t.length < 5) {
+      if (recoveryCurrent.length >= 2) {
+        const code = recoveryCurrent.join("\n").trim();
+        if (code.length >= 10 && !capturedLines.has(code.trim())) {
+          recovered.push({
+            code, lang: detectLanguage(code),
+            lines: code.split("\n").length,
+            source: "hljs-recovery", page: 1,
+            startLine: i - recoveryCurrent.length,
+            endLine: i - 1,
+          });
+        }
+      }
+      recoveryCurrent = [];
+      continue;
+    }
+    if (capturedLines.has(t) || isROutput(t)) {
+      if (recoveryCurrent.length >= 2) {
+        const code = recoveryCurrent.join("\n").trim();
+        if (code.length >= 10 && !capturedLines.has(code.trim())) {
+          recovered.push({
+            code, lang: detectLanguage(code),
+            lines: code.split("\n").length,
+            source: "hljs-recovery", page: 1,
+            startLine: i - recoveryCurrent.length,
+            endLine: i - 1,
+          });
+        }
+      }
+      recoveryCurrent = [];
+      continue;
+    }
+    // Check with hljs — is this line code?
+    const lineVal = validateLine(t);
+    if (lineVal.isCode && !isCodeLine(lines[i])) {
+      recoveryCurrent.push(lines[i].replace(/\s+$/, ""));
+    } else {
+      if (recoveryCurrent.length >= 2) {
+        const code = recoveryCurrent.join("\n").trim();
+        if (code.length >= 10 && !capturedLines.has(code.trim())) {
+          recovered.push({
+            code, lang: detectLanguage(code),
+            lines: code.split("\n").length,
+            source: "hljs-recovery", page: 1,
+            startLine: i - recoveryCurrent.length,
+            endLine: i - 1,
+          });
+        }
+      }
+      recoveryCurrent = [];
+    }
+  }
+  if (recoveryCurrent.length >= 2) {
+    const code = recoveryCurrent.join("\n").trim();
+    if (code.length >= 10 && !capturedLines.has(code.trim())) {
+      recovered.push({
+        code, lang: detectLanguage(code),
         lines: code.split("\n").length,
-        source: b.source,
-        page: b.page,
+        source: "hljs-recovery", page: 1,
+        startLine: 0, endLine: lines.length - 1,
       });
     }
   }
+  finalBlocks.push(...recovered);
 
   return { blocks: finalBlocks, stats };
 }
