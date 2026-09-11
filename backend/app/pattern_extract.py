@@ -23,6 +23,7 @@ Special handling for Indonesian modul praktikum preserved:
 """
 import re
 import json
+import logging
 from typing import List, Dict, Any, Tuple
 
 from .language_detection import (
@@ -44,6 +45,39 @@ from .language_detection import (
     JSON_SIGNALS,
     MATLAB_SIGNALS,
 )
+
+logger = logging.getLogger(__name__)
+
+# Layer 2 + Layer 3: Pygments validation (syntax-aware filtering + recovery)
+# These modules are optional — extraction still works without them (graceful
+# degradation). When available, they add syntax-aware accuracy on top of
+# pattern matching.
+try:
+    from .hljs_validator import validate_code_block, validate_line
+    _HLJS_AVAILABLE = True
+except ImportError:
+    _HLJS_AVAILABLE = False
+    validate_code_block = None  # type: ignore
+    validate_line = None  # type: ignore
+
+# Layer 4: ONNX NLP classifier (all-MiniLM-L6-v2, ~42MB total)
+# Runs entirely on CPU, no GPU/PyTorch needed. Fits Render free tier (512MB).
+# Disabled by default — enable via env var CL_NLP_ENABLED=1.
+import os
+_NLP_ENABLED = os.environ.get("CL_NLP_ENABLED", "0") == "1"
+if _NLP_ENABLED:
+    try:
+        from .nlp_classifier import nlp_enhanced_extraction, is_nlp_available
+        _NLP_AVAILABLE = True
+    except ImportError:
+        _NLP_AVAILABLE = False
+        nlp_enhanced_extraction = None  # type: ignore
+        is_nlp_available = None  # type: ignore
+        logger.warning("NLP classifier requested but nlp_classifier module not available")
+else:
+    _NLP_AVAILABLE = False
+    nlp_enhanced_extraction = None  # type: ignore
+    is_nlp_available = None  # type: ignore
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -1859,14 +1893,16 @@ def extract_code_blocks(text):
     merged = _merge_fragmented_blocks(all_candidates, lines)
 
     # ── Phase 1 Fix #4: strip_narrative + strip_r_output + structural bypass ──
+    # ── Layer 2: Pygments validation (syntax-aware filtering) ──
     final_blocks = []
     for b in merged:
         no_narrative = strip_narrative(b["code"])
         no_r, _ = strip_r_output(no_narrative)
         if len(no_r) >= 10 and no_r.count("\n") + 1 >= 1:
             detected_lang = detect_language(no_r)
-            # Structural language bypass — these languages don't need hljs validation
-            # (we don't use hljs here, but keep the logic consistent with the TS version)
+            # Structural language bypass — these languages are recognized by
+            # our own detector with high confidence and don't need pygments
+            # validation (pygments may not recognize JSON/HTML/CSS/SQL well).
             if detected_lang in ("json", "html", "css", "sql", "php", "bash"):
                 final_blocks.append({
                     "code": no_r,
@@ -1876,7 +1912,20 @@ def extract_code_blocks(text):
                     "page": b.get("page", 1),
                 })
             else:
-                # For non-structural, additional sanity check via signal counting
+                # Layer 2: Pygments validation — is this really code?
+                # If pygments is available and says it's NOT code (low relevance),
+                # we still keep it if our own signal counting is strong enough.
+                pygments_passed = True
+                if _HLJS_AVAILABLE and validate_code_block is not None:
+                    try:
+                        validation = validate_code_block(no_r)
+                        if not validation.get("is_code", True):
+                            pygments_passed = False
+                    except Exception:
+                        # If pygments fails, fall back to accepting the block
+                        pygments_passed = True
+
+                # Signal counting (our own heuristic) as fallback / confirmation
                 r_hits = no_r.count("<-") + \
                          len(re.findall(r"library\s*\(", no_r)) + \
                          len(re.findall(r"\bprint\s*\(", no_r))
@@ -1886,8 +1935,13 @@ def extract_code_blocks(text):
                 js_hits = len(re.findall(r"\b(const|let|var)\s+\w+", no_r)) + \
                           len(re.findall(r"function\s+\w+", no_r)) + \
                           len(re.findall(r"console\.\w+", no_r))
-                # Accept the block if it has strong code signals or it's not classified unknown
-                if detected_lang != "unknown" or r_hits >= 2 or py_hits >= 2 or js_hits >= 2:
+                strong_signals = r_hits >= 2 or py_hits >= 2 or js_hits >= 2
+
+                # Accept the block if:
+                # - pygments says it's code, OR
+                # - our own signals are strong (>= 2 hits), OR
+                # - language was detected (not "unknown")
+                if pygments_passed or strong_signals or detected_lang != "unknown":
                     final_blocks.append({
                         "code": no_r,
                         "lang": detected_lang,
@@ -1895,6 +1949,95 @@ def extract_code_blocks(text):
                         "source": b.get("source", "pattern"),
                         "page": b.get("page", 1),
                     })
+
+    # ── Layer 3: Pygments recovery — catches code lines pattern matching missed ──
+    # Scan removed lines; if pygments says they're code, add them back as blocks.
+    if _HLJS_AVAILABLE and validate_line is not None:
+        captured_lines = set()
+        for b in final_blocks:
+            for l in b["code"].split("\n"):
+                captured_lines.add(l.strip())
+
+        recovered = []
+        current_recover = []
+        for i, line in enumerate(lines):
+            t = line.strip()
+            if not t or len(t) < 5:
+                if len(current_recover) >= 2:
+                    code = "\n".join(current_recover).strip()
+                    if len(code) >= 10 and code.strip() not in captured_lines:
+                        recovered.append({
+                            "code": code,
+                            "lang": detect_language(code),
+                            "lines": code.count("\n") + 1,
+                            "source": "pygments-recovery",
+                            "page": 1,
+                        })
+                current_recover = []
+                continue
+            if t in captured_lines or is_r_output(line):
+                if len(current_recover) >= 2:
+                    code = "\n".join(current_recover).strip()
+                    if len(code) >= 10 and code.strip() not in captured_lines:
+                        recovered.append({
+                            "code": code,
+                            "lang": detect_language(code),
+                            "lines": code.count("\n") + 1,
+                            "source": "pygments-recovery",
+                            "page": 1,
+                        })
+                current_recover = []
+                continue
+            # Check with pygments — is this line code?
+            try:
+                line_val = validate_line(t)
+                if line_val.get("is_code", False) and not is_code_line(line):
+                    current_recover.append(line.rstrip())
+                else:
+                    if len(current_recover) >= 2:
+                        code = "\n".join(current_recover).strip()
+                        if len(code) >= 10 and code.strip() not in captured_lines:
+                            recovered.append({
+                                "code": code,
+                                "lang": detect_language(code),
+                                "lines": code.count("\n") + 1,
+                                "source": "pygments-recovery",
+                                "page": 1,
+                            })
+                    current_recover = []
+            except Exception:
+                current_recover = []
+        # Don't forget the last batch
+        if len(current_recover) >= 2:
+            code = "\n".join(current_recover).strip()
+            if len(code) >= 10 and code.strip() not in captured_lines:
+                recovered.append({
+                    "code": code,
+                    "lang": detect_language(code),
+                    "lines": code.count("\n") + 1,
+                    "source": "pygments-recovery",
+                    "page": 1,
+                })
+        final_blocks.extend(recovered)
+
+    # ── Layer 4: ONNX NLP classifier — catches ambiguous lines pygments missed ──
+    # Only runs if CL_NLP_ENABLED=1 and the NLP model is available.
+    # Uses all-MiniLM-L6-v2 (~22MB ONNX) — runs on CPU, no GPU needed.
+    if _NLP_ENABLED and _NLP_AVAILABLE and nlp_enhanced_extraction is not None:
+        try:
+            if is_nlp_available is None or is_nlp_available():
+                captured_lines = set()
+                for b in final_blocks:
+                    for l in b["code"].split("\n"):
+                        captured_lines.add(l.strip())
+                nlp_blocks, nlp_count = nlp_enhanced_extraction(
+                    final_blocks, lines, captured_lines
+                )
+                if nlp_blocks:
+                    final_blocks.extend(nlp_blocks)
+                    logger.info(f"NLP enhancement: added {len(nlp_blocks)} blocks, {nlp_count} code lines")
+        except Exception as e:
+            logger.warning(f"NLP enhancement failed (graceful degradation): {e}")
 
     return final_blocks
 
