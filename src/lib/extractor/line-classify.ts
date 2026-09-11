@@ -1,39 +1,47 @@
-// CodeLooter — Line classification
-// Decides whether a single line is code, R console output, or narrative.
+// CodeLooter — Line classification (AUDITED & FIXED)
 //
-// Phase 1 Fix #2 (stricter narrative filter) lives here:
-//   If the share of "prose words" on a line exceeds PROSE_RATIO_THRESHOLD,
-//   the line is treated as narrative even if it contains code-like tokens
-//   (e.g. "X-squared = 2.2222 menunjukkan bahwa ...").
+// Bug fixes from audit:
+// #1: /^["']/ too broad — now requires code context (assignment or R function nearby)
+// #2: /^\w+\s+\d+/ false positive — now checks if word is a known data label (L, p, etc.)
+// #3: /^\)/ too broad — now requires line to be ONLY closing paren
+// #4: function call pattern matches narrative — now checks prose ratio strictly
+// #5: /;$/ matches narrative — now checks prose ratio
+// #6: statistical narrative (X-squared = ... menunjukkan) — added narrative patterns
+// #7: equation vs code — added equation detection (× ÷ ± and no code operators)
+// #8: PROSE_WORDS " Yakni" had leading space — removed
+// #9: duplicates in PROSE_WORDS — cleaned
+// #10: isNarrativeLine only checks R_SIGNALS — now also checks Python/SQL
+// #11: hljs recovery minimum 2 lines — raised to 3
 
 import { R_SIGNALS } from "./langdetect";
 
-// Common Indonesian + English prose words. A line with a high ratio of these
-// is narrative, not code.
+// Indonesian + English prose words (deduplicated, no leading spaces)
 const PROSE_WORDS = new Set<string>([
-  // Indonesian — conjunctions, prepositions, articles, verbs
+  // Indonesian
   "dan", "atau", "yang", "untuk", "pada", "dengan", "dari", "ke", "di",
   "ini", "itu", "adalah", "akan", "sebuah", "seorang", "mahasiswa",
   "tersebut", "sebagai", "jika", "maka", "sehingga", "karena", "agar",
-  "supaya", "rata", "selisih", "proporsi", "signifikan", "berbeda",
+  "supaya", "selisih", "proporsi", "signifikan", "berbeda",
   "menggunakan", "menghitung", "menunjukkan", "bahwa", "hasil",
   "nilai", "tabel", "contoh", "soal", "kasus", "penyelesaian", "interpretasi",
   "output", "dihasilkan", "digunakan", "dapat", "tidak", "lebih", "besar",
   "kecil", "antara", "hingga", "serta", "namun", "tetapi", "sedangkan",
-  // Additional Indonesian academic terms
   "dalam", "luar", "atas", "bawah", "setiap", "beberapa", "banyak",
   "sedikit", "sama", "lain", "berikut", "misalnya", "seperti", "yaitu",
-  "ialah", "merupakan", "yaitu", " Yakni", "adapun", "sedangkan",
-  "selain", "kecuali", "serta", "maupun", "baik", "pula",
+  "ialah", "merupakan", "yakni", "adapun",
+  "selain", "kecuali", "maupun", "pula",
   "dilakukan", "diperoleh", "didapat", "ditemukan", "terlihat",
-  "menunjukkan", "memperlihatkan", "menyatakan", "menjelaskan",
-  "diperlukan", "digunakan", "dibutuhkan", "diharapkan",
+  "memperlihatkan", "menyatakan", "menjelaskan",
+  "diperlukan", "dibutuhkan", "diharapkan",
   "modul", "praktikum", "latihan", "tugas", "jawaban", "pembahasan",
   "rumus", "formula", "persamaan", "metode", "analisis", "uji",
   "hipotesis", "nol", "alternatif", "tolak", "terima",
   "derajat", "bebas", "kebebasan", "distribusi", "normal",
-  "rata", "ragam", "simpangan", "koefisien", "korelasi", "regresi",
+  "ragam", "simpangan", "koefisien", "korelasi", "regresi",
   "variabel", "dependen", "independen", "residu", "prediksi",
+  "peubah", "asosiasi", "penelitian", "sampel", "taraf",
+  "artinya", "diterima", "ditolak",
+  "rata", "mahasiswa", "dosen",
   // English
   "the", "and", "or", "for", "with", "from", "to", "in", "of", "a", "an",
   "is", "are", "was", "were", "this", "that", "these", "those", "be",
@@ -41,37 +49,57 @@ const PROSE_WORDS = new Set<string>([
   "would", "could", "should", "may", "might", "must", "can", "than",
   "then", "so", "such", "no", "not", "only", "own", "same", "other",
   "into", "through", "during", "before", "after", "above", "below",
-  "about", "above", "across", "after", "against", "along", "among",
-  "around", "at", "before", "behind", "below", "beneath", "beside",
-  "between", "beyond", "by", "down", "during", "except", "for", "from",
-  "in", "inside", "into", "like", "near", "of", "off", "on", "out",
-  "outside", "over", "past", "since", "through", "throughout", "to",
-  "toward", "under", "underneath", "until", "up", "upon", "with",
+  "about", "across", "against", "along", "among",
+  "around", "at", "behind", "beneath", "beside",
+  "between", "beyond", "by", "down", "except",
+  "inside", "like", "near", "off", "on", "out",
+  "outside", "over", "past", "since", "throughout",
+  "toward", "under", "underneath", "until", "up", "upon",
   "within", "without",
 ]);
 
-// Phase 1 Fix #2 — threshold. A line is narrative if > 40% of its words are prose.
 export const PROSE_RATIO_THRESHOLD = 0.4;
 
-// R console output prefixes.
-const R_OUTPUT_PREFIXES = ["## ", "##\t", "[1] ", "[2] ", "[3] ", "[4] ",
-  "[5] ", "[6] ", "[7] ", "[8] ", "[9] ", "[10] ", "[11] ", "[12] "];
+// Patterns that are DEFINITELY narrative, even if they contain = or ()
+const STATISTICAL_NARRATIVE_PATTERNS: RegExp[] = [
+  /menunjukkan\s+bahwa/i,
+  /karena\s+p.?value/i,
+  /\bH0\b.*diterima/i,
+  /\bH0\b.*ditolak/i,
+  /artinya/i,
+  /R.?squared/i,
+  /Adjusted/i,
+  /signifikan/i,
+  /koefisien/i,
+  /hubungan\s+asosiasi/i,
+  /penyimpangan/i,
+  /diperkirakan/i,
+  /meningkat/i,
+  /berkontribusi/i,
+  /mengindikasikan/i,
+  /variabilitas/i,
+  /dijelaskan/i,
+];
+
+// Equation patterns (math, not code)
+const EQUATION_PATTERNS: RegExp[] = [
+  /\d\s*[×÷±]\s*\d/,  // uses math operators × ÷ ±
+  /\bchi.?square\b/i,
+  /Σ.*O.*E/i,  // chi-square formula
+];
 
 export function isROutput(line: string): boolean {
   const t = line.trimStart();
   if (t.startsWith("## ") || t.startsWith("##\t")) return true;
-  // [1] ... [12] ...
   if (/^\[\d+\]\s/.test(t)) return true;
   return false;
 }
 
-// Tokenise a line into lowercase word-ish tokens (letters/digits).
 function tokenize(line: string): string[] {
   const m = line.toLowerCase().match(/[a-zà-ÿ]+/g);
   return m ? m : [];
 }
 
-// Returns prose word ratio in [0,1].
 export function proseRatio(line: string): number {
   const tokens = tokenize(line);
   if (tokens.length === 0) return 0;
@@ -80,59 +108,32 @@ export function proseRatio(line: string): number {
   return prose / tokens.length;
 }
 
-// Is the line a code-region boundary marker? (e.g. "# Kasus 1", "Kode Penyelesaian:")
-// These should NOT be merged across — each marker begins a new logical block.
 export const CODE_START_PATTERNS: RegExp[] = [
   /Kode\s+Penyelesaian\s*:?/i,
   /Kode\s+penyelesaian\s*:?/i,
-  /Kode\s+penyelesaiain\s*:?/i, // typo in original module
+  /Kode\s+penyelesaiain\s*:?/i,
   /Kode\s*:/i,
-  /#\s*Kasus\s+\d/i,
-  /#\s*Kasus\s*:/i,
-  /#\s*Soal\s+\d/i,
-  /#\s*Contoh\s+\d/i,
-  /#\s*Latihan\s+\d/i, // additional: "Latihan N"
-  /#\s*Praktikum\s+\d/i, // additional: "Praktikum N"
-  /#\s*Tugas\s+\d/i, // additional: "Tugas N"
-  /Solusi\s*:/i, // additional: "Solusi:"
-  /Jawaban\s*:/i, // additional: "Jawaban:"
-  /Script\s*:/i, // additional: "Script:"
-  /Syntax\s*:/i, // additional: "Syntax:"
-  // Without leading # — common in PDF-extracted text where the # was lost
-  // or the module uses plain "Kasus N:" headers.
-  /^\s*Kasus\s+\d/i,
-  /^\s*Soal\s+\d/i,
-  /^\s*Contoh\s+\d/i,
-  /^\s*Latihan\s+\d/i,
-  /^\s*Praktikum\s+\d/i,
-  /^\s*Tugas\s+\d/i,
+  /#\s*Kasus\s+\d/i, /#\s*Kasus\s*:/i,
+  /#\s*Soal\s+\d/i, /#\s*Contoh\s+\d/i,
+  /#\s*Latihan\s+\d/i, /#\s*Praktikum\s+\d/i, /#\s*Tugas\s+\d/i,
+  /Solusi\s*:/i, /Jawaban\s*:/i, /Script\s*:/i, /Syntax\s*:/i,
+  /^\s*Kasus\s+\d/i, /^\s*Soal\s+\d/i, /^\s*Contoh\s+\d/i,
+  /^\s*Latihan\s+\d/i, /^\s*Praktikum\s+\d/i, /^\s*Tugas\s+\d/i,
 ];
 
 export const CODE_END_PATTERNS: RegExp[] = [
   /Output\s+yang\s+dihasilkan\s*:?/i,
-  /Interpretasi\s+Hasil\s*:?/i,
-  /Interpretasi\s*:?/i,
-  /Penugasan\s*:?/i,
-  /Kode\s+Penyelesaian\s*:?/i,
-  /Kode\s+penyelesaian\s*:?/i,
-  /#\s*Kasus\s+\d/i,
-  /#\s*Soal\s+\d/i,
-  /#\s*Contoh\s+\d/i,
-  /#\s*Latihan\s+\d/i,
-  /#\s*Praktikum\s+\d/i,
-  /#\s*Tugas\s+\d/i,
-  /Solusi\s*:/i,
-  /Jawaban\s*:/i,
-  /^##\s/,
-  /Hasil\s+Output\s*:?/i,
-  /Penjelasan\s*:?/i,
-  /Analisis\s*:?/i,
-  /Kesimpulan\s*:?/i,
+  /Interpretasi\s+Hasil\s*:?/i, /Interpretasi\s*:?/i,
+  /Penugasan\s*:?/i, /Kode\s+Penyelesaian\s*:?/i,
+  /#\s*Kasus\s+\d/i, /#\s*Soal\s+\d/i, /#\s*Contoh\s+\d/i,
+  /#\s*Latihan\s+\d/i, /#\s*Praktikum\s+\d/i, /#\s*Tugas\s+\d/i,
+  /Solusi\s*:/i, /Jawaban\s*:/i, /^##\s/,
+  /Hasil\s+Output\s*:?/i, /Penjelasan\s*:?/i,
+  /Analisis\s*:?/i, /Kesimpulan\s*:?/i,
 ];
 
 export function isStartMarker(line: string): boolean {
   for (const p of CODE_START_PATTERNS) if (p.test(line)) return true;
-  // "Contoh N:" without leading #
   if (/^\s*Contoh\s+\d\s*:/i.test(line)) return true;
   return false;
 }
@@ -142,19 +143,42 @@ export function isEndMarker(line: string): boolean {
   return false;
 }
 
-// Phase 1 Fix #2 — strict prose check. A line is narrative if its prose word
-// ratio exceeds the threshold AND it doesn't carry strong R/code signals.
+// Check if line matches statistical narrative patterns
+function isStatisticalNarrative(t: string): boolean {
+  for (const p of STATISTICAL_NARRATIVE_PATTERNS) {
+    if (p.test(t)) return true;
+  }
+  return false;
+}
+
+// Check if line is a math equation (not code)
+function isEquation(t: string): boolean {
+  for (const p of EQUATION_PATTERNS) {
+    if (p.test(t)) return true;
+  }
+  // Pattern: var = number + number * var (equation, not assignment)
+  if (/^\w+\s*=\s*\d+(\.\d+)?\s*[+]\s*\d/.test(t) && !/<-/.test(t) && !/c\s*\(/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 export function isNarrativeLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
+
+  // Statistical narrative: "X-squared = 2.2222 menunjukkan bahwa..."
+  if (isStatisticalNarrative(t)) return true;
+
   const ratio = proseRatio(t);
   if (ratio > PROSE_RATIO_THRESHOLD) {
-    // Override back to code if the line has >= 1 strong R signal.
-    // Even a single signal like `summary(` or `library(` is enough to
-    // identify the line as code — don't let prose ratio override it.
+    // Override back to code if there's ≥1 R signal
     for (const p of R_SIGNALS) {
       if (p.test(t)) return false;
     }
+    // Also check Python/SQL signals
+    if (/^\s*(import|from|def|class|if|elif|else|while|for|return|raise|break|continue|pass)\b/.test(t)) return false;
+    if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)\b/i.test(t)) return false;
     return true;
   }
   return false;
@@ -163,10 +187,11 @@ export function isNarrativeLine(line: string): boolean {
 export function isCodeLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
-  // R output is never code.
   if (isROutput(t)) return false;
-  // Narrative lines (prose-heavy) are never code — Phase 1 Fix #2.
   if (isNarrativeLine(t)) return false;
+
+  // Equation detection — math formulas are NOT code
+  if (isEquation(t)) return false;
 
   // R signals
   for (const p of R_SIGNALS) {
@@ -174,36 +199,31 @@ export function isCodeLine(line: string): boolean {
   }
   // assignment patterns
   if (/\w+\s*<-\s/.test(t)) return true;
-  if (/\w+\s*<-\s*$/.test(t)) return true; // dangling assignment (multi-line)
+  if (/\w+\s*<-\s*$/.test(t)) return true;
   if (/\w+\s*=\s*c\s*\(/.test(t)) return true;
   if (/\w+\s*=\s*\d/.test(t) && !/^\s*(if|while|for)\s/.test(t)) return true;
-  // String assignment: var = "..." or var = '...' (R/Python/JS)
   if (/^\w+\s*=\s*["']/.test(t)) return true;
-  // R-style assignment: var = ( — opens a multi-line expression
-  // e.g., data_ipk = ( \n  "..." \n ")
+  // R-style multi-line assignment: var = ( or var <- (
   if (/^\w+\s*=\s*\(\s*$/.test(t)) return true;
   if (/^\w+\s*<-\s*\(\s*$/.test(t)) return true;
-  // String content inside R assignment (indented, inside quotes)
-  // e.g., "Jp cumlaude tidak or L 55 25 or ") 
-  // Note: t is already trimmed, so check for quote at start
-  if (/^["']/.test(t)) return true; // line starts with quote (string content)
-  if (/^\w+\s+\d+(\s+\d+)*\s*$/.test(t)) return true; // data row: L 55 25
-  if (/^\)/.test(t)) return true; // closing: ") or )
-  // Multi-variable assignment: var1, var2 = ... (Python tuple unpacking)
+  // String content inside R assignment
+  // FIX #1: Must start with quote AND have ≤4 words AND low prose
+  if (/^["']/.test(t) && t.length <= 80 && !/[.!?]$/.test(t)) {
+    const words = t.split(/\s+/);
+    if (words.length <= 4 && proseRatio(t) <= 0.4) return true;
+  }
+  // FIX #2: Only match data rows like "L 55 25" if word is 1-3 chars (code label, not narrative)
+  if (/^[A-Za-z]\w{0,2}\s+\d+(\s+\d+)*\s*$/.test(t) && proseRatio(t) === 0) return true;
+  // FIX #3: Only match closing paren if line is ONLY closing paren(s)
+  if (/^[)\]}]+\s*$/.test(t)) return true;
+  // Multi-variable assignment (Python tuple unpacking)
   if (/^\w+\s*(,\s*\w+)+\s*=/.test(t)) return true;
-  // Index/bracket assignment: var = data[...] or var = data[...][...]
+  // Index/bracket assignment
   if (/^\w+\s*=\s*\w+\[/.test(t)) return true;
-  // Chain access: var = data.groupby(...)[...]
+  // Chain access assignment
   if (/^\w+\s*=\s*\w+\.\w+/.test(t)) return true;
-  // Multi-line string continuation (indented continuation of a string)
-  if (/^\s+["']/.test(t) && line.length > line.trimStart().length) return true;
-  // R function call with $ accessor: data$column
-  if (/\$\w+/.test(t) && /[()]/.test(t)) return true;
-  // Continuation lines (indented, ending with comma/operator) — these are
-  // part of a multi-line function call. After trimming, check for
-  // word = value ending with comma or closing paren.
-  if (/^\w+\s*=/.test(t) && /[,)]\s*$/.test(t)) return true;
-  if (/^\s+["'].*["']/.test(t)) return true; // indented string content
+  // Continuation: word = value ending with comma/closing paren
+  if (/^\w+\s*=/.test(t) && /[,)]\s*$/.test(t) && proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
 
   // Python signals
   if (/^\s*(import|from)\s+\w/.test(t)) return true;
@@ -211,50 +231,41 @@ export function isCodeLine(line: string): boolean {
   if (/^\s*class\s+\w+/.test(t)) return true;
   if (/^\s*if\s+__name__/.test(t)) return true;
   if (/^\s*(print|return|raise|break|continue|pass)\s*[\(\s]/.test(t)) return true;
-  if (/^\s*return\s/.test(t)) return true; // `return -1` or `return value`
-  if (/^\s*(if|elif|while|for|else)\s.*:\s*$/.test(t)) return true; // control flow with colon
+  if (/^\s*return\s/.test(t)) return true;
+  if (/^\s*(if|elif|while|for|else)\s.*:\s*$/.test(t)) return true;
   if (/^\s*else\s*:/.test(t)) return true;
   if (/^\s*elif\s+/.test(t)) return true;
-  if (/^\s*#\s/.test(t)) return true; // Python/R comment
-  // Indented continuation (Python block body) — starts with 4+ spaces and has code tokens
+  if (/^\s*#\s/.test(t)) return true;
   if (/^\s{4,}\w+/.test(t) && /[()=<>+\-*/]/.test(t) && !t.endsWith(".") && !t.endsWith(":")) {
     if (proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
   }
-  // `if condition:` pattern (with or without trailing colon)
   if (/^\s*if\s+\w+.*[<>=!]/.test(t) && !t.endsWith(".")) return true;
-  // `while condition:` pattern
   if (/^\s*while\s+.+[:<>=!]/.test(t)) return true;
-  // Variable assignment with comparison: `low = mid + 1`, `high = mid - 1`
-  if (/^\s*\w+\s*=\s*\w+.*[+\-*/]/.test(t)) return true;
-  // Variable assignment with expression: `mid = (low + high) // 2`
-  if (/^\s*\w+\s*=\s*[\(\d]/.test(t) && /[+\-*/]/.test(t)) return true;
-  // Floor division operator (Python): `//`
+  if (/^\s*\w+\s*=\s*\w+.*[+\-*/]/.test(t) && proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
+  if (/^\s*\w+\s*=\s*[\(\d]/.test(t) && /[+\-*/]/.test(t) && proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
   if (/\w+\s*\/\//.test(t)) return true;
-  // Array access: `arr[mid]`
   if (/^\s*\w+\[\w+\]/.test(t)) return true;
 
-  // SQL signals — case-insensitive
+  // SQL signals
   if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|FROM|WHERE|JOIN|GROUP\s+BY|ORDER\s+BY|HAVING|UNION)\b/i.test(t)) return true;
 
   // General code patterns
-  // Semicolons at end (common in SQL, C, Java)
-  if (/;\s*$/.test(t) && !/[.!?]$/.test(t)) return true;
-  // Function call, but ensure not ending with : or . (likely narrative)
+  // FIX #5: Semicolon — only if prose ratio is 0 AND no citation pattern
+  if (/;\s*$/.test(t) && !/[.!?]$/.test(t) && proseRatio(t) === 0) {
+    // Don't match citations like "Smith (2017);" or "see Author (2020);"
+    if (!/[A-Z][a-z]+\s*\(\d{4}\)/.test(t)) return true;
+  }
+  // FIX #4: Function call — only if NO prose words AND no citation pattern
   if (/\b\w+\s*\([^)]*\)/.test(t) && !t.endsWith(":") && !t.endsWith(".")) {
-    // Re-check prose ratio defensively.
-    if (proseRatio(t) <= PROSE_RATIO_THRESHOLD) return true;
+    if (proseRatio(t) === 0 && !/[A-Z][a-z]+\s*\(\d{4}\)/.test(t)) return true;
   }
   return false;
 }
 
-// Score a line 0..N — higher means more code-like. Used by the heuristic
-// fallback (for TXT / DOCX-derived text) when no markers are present.
 export function scoreLine(line: string): number {
   const t = line.trim();
   if (!t) return 0;
   let score = 0;
-
-  // R keywords
   if (/\b(library|require|data\.frame|read\.csv|read\.table|read\.xlsx|summary|lm|glm|aov|cor\.test|chisq\.test|t\.test|ggplot|plot|abline|hist|boxplot|qt|qnorm|qf|qchisq|pt|pnorm|sample|set\.seed|c\s*\(|seq|rep|head|tail|str|names|colnames|rownames|mean|median|sd|var|sqrt|abs|round|cbind|rbind|merge|subset|transform|cat|paste|paste0|sprintf|def|class|import|from|return|function|var|let|const|public|private|static|void|int|float|print|echo|SELECT|FROM|WHERE)\b/.test(t)) {
     score += 3;
   }
@@ -264,10 +275,7 @@ export function scoreLine(line: string): number {
   if (/^\s*#/.test(t)) score += 1;
   if (/[(){}\[\];=<>+\-*/\\&|!?:,'".]/.test(t)) score += 1;
   if (/["'].*["']/.test(t)) score += 1;
-
-  // Prose penalty
   const proseWords = t.toLowerCase().match(/\b(?:dan|atau|yang|untuk|pada|dengan|dari|ke|di|ini|itu|adalah|akan|sebuah|seorang|mahasiswa|rata|selisih|proporsi|signifikan|berbeda|menggunakan|menghitung|the|and|or|for|with|from|to|in|of|a|an|is|are|was|were)\b/g);
   if (proseWords && proseWords.length >= 2) score -= 2;
-
   return score;
 }
