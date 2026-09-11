@@ -202,30 +202,64 @@ export function extractCodeBlocksFromText(
   }
 
   // ── Phase 1 Fix #2 is applied implicitly via isCodeLine (prose ratio) ──
-  // ── Strategy 1: marker-anchored extraction ──
+  // ── Strategy 1: marker-anchored extraction with string-context awareness ──
   const startPositions = findStartPositions(lines);
   const candidates: CandidateBlock[] = [];
 
   for (let s = 0; s < startPositions.length; s++) {
     const start = startPositions[s];
-    // Phase 1 Fix #1: a block's region extends to the NEXT start marker.
-    // Soft end markers (Interpretasi:, Output yang dihasilkan:, ##) are NOT
-    // hard boundaries — they are narrative / R-output lines that get filtered
-    // out by isCodeLine(). This prevents a 1-line narrative from splitting a
-    // single code block into two.
     let end = lines.length;
     if (s + 1 < startPositions.length) end = startPositions[s + 1];
 
-    // Collect code lines from [start, end).
+    // Collect code lines from [start, end) with string-context awareness.
+    // When we're inside a multi-line string (data_ipk = "..."), ALL lines
+    // until the closing quote are code content.
     const codeLines: string[] = [];
+    let insideString = false;
+
     for (let j = start; j < end; j++) {
       const line = lines[j].replace(/\s+$/, "");
       if (!line.trim()) continue;
       const t = line.trim();
-      // Skip a standalone "Kode Penyelesaian:" / "Kode:" label line.
+
+      // Skip standalone label lines.
       if (/^\s*(Kode\s+[Pp]enyelesaian|Kode\s*:)\s*:?\s*$/i.test(t)) continue;
-      if (isCodeLine(line) || isROutput(line)) {
+
+      // String context: if we're inside a multi-line string, capture everything
+      // until the closing quote.
+      if (insideString) {
         codeLines.push(line);
+        // Check if this line contains the closing quote.
+        // Count unescaped quotes — if odd number, string closes on this line.
+        const quoteCount = (t.match(/"/g) || []).length;
+        if (quoteCount % 2 === 1) {
+          insideString = false;
+        }
+        continue;
+      }
+
+      // Check if this line opens a multi-line string (has odd number of quotes).
+      const quoteCount = (t.match(/"/g) || []).length;
+      const isCode = isCodeLine(line) || isROutput(line);
+
+      if (isCode) {
+        codeLines.push(line);
+        // If line has assignment with opening quote but no closing quote,
+        // we're inside a string.
+        if (quoteCount % 2 === 1 && /=\s*"/.test(t)) {
+          insideString = true;
+        }
+      } else {
+        // Not code and not in string — but check if it's string content
+        // between opening and closing quotes on separate lines.
+        // e.g., data_ipk = "
+        //   ipk frekuensi
+        //   A 12
+        // "
+        // The "ipk frekuensi" and "A 12" lines are not code by themselves
+        // but are part of the string literal.
+        // We DON'T capture these here — they'll be missed by isCodeLine.
+        // The string-context above handles them when insideString=true.
       }
     }
 

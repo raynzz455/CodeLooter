@@ -179,6 +179,12 @@ export function isCodeLine(line: string): boolean {
   if (/\w+\s*=\s*\d/.test(t) && !/^\s*(if|while|for)\s/.test(t)) return true;
   // String assignment: var = "..." or var = '...' (R/Python/JS)
   if (/^\w+\s*=\s*["']/.test(t)) return true;
+  // Multi-variable assignment: var1, var2 = ... (Python tuple unpacking)
+  if (/^\w+\s*(,\s*\w+)+\s*=/.test(t)) return true;
+  // Index/bracket assignment: var = data[...] or var = data[...][...]
+  if (/^\w+\s*=\s*\w+\[/.test(t)) return true;
+  // Chain access: var = data.groupby(...)[...]
+  if (/^\w+\s*=\s*\w+\.\w+/.test(t)) return true;
   // Multi-line string continuation (indented continuation of a string)
   if (/^\s+["']/.test(t) && line.length > line.trimStart().length) return true;
   // R function call with $ accessor: data$column

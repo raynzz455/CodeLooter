@@ -143,10 +143,16 @@ export function detectLanguage(code: string): string {
   if (/<-/.test(code) && rHits >= 1) return "r";
   if (/\blibrary\s*\(/.test(code)) return "r";
 
+  // R-specific function patterns (even without <-)
+  if (/\b(hist|boxplot|qqnorm|qqline|par\s*\(|cat\s*\(|plot\s*\(|abline\s*\()/.test(code)) return "r";
+  if (/\b(c\s*\(|mean\s*\(|median\s*\(|sd\s*\(|var\s*\(|table\s*\()/.test(code) && !/\bdef\s+/.test(code)) return "r";
+
   if (pyHits >= 2) return "python";
   if (sqlHits >= 2) return "sql";
 
   if (/<-/.test(code)) return "r";
+  // Fallback: if there are R signals even just 1, assume R
+  if (rHits >= 1) return "r";
   return "unknown";
 }
 
