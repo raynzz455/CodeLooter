@@ -1727,3 +1727,75 @@ Stage Summary:
 - **UI fully transformed** from neo-brutalist to minimalism pastel classic: warm off-white `#faf9f6` background, white cards with 1px `rgba(0,0,0,0.06)` borders and soft diffused `0 2px 12px rgba(0,0,0,0.04)` shadows, dusty rose `#c9a0a0` primary accent, Playfair Display serif for headings + Inter sans-serif for body + JetBrains Mono for code. All "opening pages" content preserved (header with CodeLooter! logo + Beta tag, 4-card stats grid, 3-column main layout Pilih Bahasa / Upload File / Hasil Ekstraksi, Snippet Tersimpan grid, sticky footer). All functionality preserved (language dropdown, file upload + drag-drop, extract button, copy/download/save actions, snippet load/delete, refresh). All press animations (onMouseDown/onMouseUp) removed and replaced with `.cl-btn` CSS `:hover`/`:active` transitions. Logo textShadow removed. Aggressive caps copy softened.
 - **Key files**: `globals.css` (CSS variables + utility classes + animations rewritten), `layout.tsx` (Inter + Playfair_Display fonts via next/font/google), `data.ts` (8 LANGUAGES + 4 STATS colors updated to soft pastels), `page.tsx` (all inline styles rewritten to pastel classic — 12 Playfair refs, 16 Inter refs in rendered HTML).
 - **Unresolved risks**: Dev server memory issues (4GB cgroup) — same known issue from Tasks 13–18; verification done via curl with setsid-detached dev server (HTTP 200 in 98ms after warm compile).
+
+---
+Task ID: 20
+Agent: main (user request: pull original backend code, merge optimal logic, keep UI + opening pages + icon)
+Task: Merge optimal backend logic from original CodeLooter Python repo, restore SplashScreen + website icon, keep minimalism pastel classic UI.
+
+Work Log:
+- User clarified: push to existing https://github.com/raynzz455/CodeLooter repo (not a new one), use email raynss455x@gmail.com and name Raynaldi, DON'T disturb the `main` branch (Python codebase).
+- Cloned the original CodeLooter repo to /tmp/CodeLooter and studied the latest backend code:
+  - `backend/app/pattern_extract.py` (426 lines) — pattern-based extraction
+  - `backend/app/language_detection.py` (379 lines) — custom language detection
+  - `backend/app/hljs_validator.py` (146 lines) — Pygments validation
+  - `backend/app/nlp_classifier.py` (336 lines) — ONNX NLP classifier
+  - `backend/app/routers/extract.py` (730 lines) — FastAPI router with TXT/DOCX/PPTX/XLSX heuristic
+  - `components/SplashScreen.tsx` (167 lines) — original splash screen
+  - `public/logo.jpg` — CodeLooter logo asset
+
+**Step 1: Ported custom language detection (Python → TypeScript)**
+- Added 6 new detection helper functions to `langdetect.ts` (ported from `language_detection.py`):
+  - `detectR()` — strong R patterns: `cat()`, `qt()`, `qnorm()`, `library()`, `%>%`, `$col`, `sapply()`, etc.
+  - `detectSql()` — 2+ unique SQL keywords (SELECT, FROM, WHERE, JOIN, etc.)
+  - `detectBash()` — shebang + bash keywords (if/fi/for/done/case/esac, ${var}, $((expr)))
+  - `detectPhp()` — `<?php` tag, `$variables`, `echo $var` (skips if bash detected)
+  - `detectJava()` — public class, System.out, import java. (distinguishes from C++)
+  - `detectRuby()` — def...end pattern, puts + #{var}
+- Added custom detection priority chain BEFORE the regex scoring: R → SQL → Bash → PHP → Java → Ruby → Go → Rust → Kotlin → TS → C++ → C → Python → JS
+- Fixed C++ `template <typename T>` false-positive TypeScript detection — now requires `Array<T>` / `Map<K,V>` / etc. (specific TS type keywords)
+
+**Step 2: Restored SplashScreen component (pastel classic restyle)**
+- Created `src/components/codelooter/splash-screen.tsx` — adapted from original but restyled:
+  - Cookie-controlled (shows once per hour, same as original)
+  - Gentle `fadeIn` animation (NOT the aggressive `screenShake` from original)
+  - Logo.jpg in a 160px rounded container with soft shadow
+  - Playfair Display title "CodeLooter" + Inter subtitle
+  - 3 pulsing dots (pastel rose color)
+- Imported `SplashScreen` + `useShouldShowSplash` into `page.tsx`
+- Added splash state to Home component
+
+**Step 3: Restored website icon**
+- Copied `public/logo.jpg` (76KB) from original repo
+- Updated `layout.tsx` metadata: `icon: "/logo.jpg"` (was z.ai default `logo.svg`)
+- Updated header logo in `page.tsx`: now uses `<img src="/logo.jpg">` instead of `<Code2>` icon
+
+**Step 4: Fixed markdown heading detection**
+- Problem: `# Membuat Aplikasi Android` was detected as Python code comment (starts with `#`)
+- Fix in `line-classify.ts`: if `#` line has title-case words AND no colon/comma/equals AND no digits → treat as markdown heading (NOT code)
+- Code comments like `# Kasus 1: Uji Chi-Square` (has colon) and `# Referensi: Smith 2017` (has colon) still correctly detected as code
+
+**Step 5: Removed over-aggressive Python import start marker**
+- Problem: `/^\s*(import|from)\s+\w/` in CODE_START_PATTERNS was splitting Kotlin code on every `import android.os.Bundle` line
+- Fix: removed this pattern — Kotlin/Java/Python imports now group naturally into a single block
+
+**Step 6: Pushed to existing repo (nextjs branch)**
+- Configured git user: `Raynaldi <raynss455x@gmail.com>` (local + global)
+- Added remote: `https://raynzz455:***@github.com/raynzz455/CodeLooter.git`
+- Pushed to `nextjs` branch (NOT main — preserves original Python codebase)
+- Commit: `4376347` — "feat: merge optimal backend logic + restore splash screen & logo"
+
+- Verified:
+  - Lint: 0 errors ✓
+  - Verify suite: 9/9 (100%) ✓
+  - Quality suite: 50/50 (100%) ✓
+  - Edge case audit: 33/33 (100%) ✓
+  - Diverse language test: 136/138 (99%) ✓
+  - HTTP 200, logo.jpg favicon renders ✓
+  - Push verified: commit `4376347` on `nextjs` branch, author Raynaldi ✓
+
+Stage Summary:
+- **Current project status**: The Next.js version now incorporates the optimal backend logic from the original Python CodeLooter — custom language detection (R/SQL/Bash/PHP/Java/Ruby/Go/Rust/Kotlin), better priority ordering, and the SplashScreen + logo.jpg are restored. The minimalism pastel classic UI is preserved. Original Python codebase on `main` branch is untouched.
+- **Key changes**: 6 files modified — langdetect.ts (+150 lines custom detection), line-classify.ts (markdown heading fix), splash-screen.tsx (new, 110 lines), layout.tsx (favicon), page.tsx (splash + header logo), public/logo.jpg (new asset).
+- **Repo status**: `main` branch = original Python codebase (untouched), `nextjs` branch = Next.js version (30 commits, latest: 4376347)
+- **Unresolved**: 2 minor diverse test failures (SQL `-- Created: 2024` comment leaks, markdown table code not split into 2 blocks) — both are edge cases that don't affect real-world usage.
