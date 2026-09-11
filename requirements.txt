@@ -2,12 +2,12 @@
 #
 # Install dengan: pip install -r requirements.txt
 #
-# Semua dependency di bawah ini GRATIS dan ringan — compatible dengan
-# Render free tier (512MB RAM, shared CPU, no GPU).
+# Semua dependency GRATIS dan ringan — compatible dengan Render free tier
+# (512MB RAM, shared CPU, no GPU).
 #
-# TIDAK ada LLM, TIDAK ada PyTorch, TIDAK ada TensorFlow.
-# Ekstraksi murni menggunakan pattern matching (regex) yang sudah
-# dioptimalkan dengan pre-processing pipeline.
+# TIDAK ADA PyTorch (~500MB), TIDAK ADA TensorFlow, TIDAK ADA LLM.
+# NLP menggunakan ONNX Runtime langsung (~15MB) + model ONNX (~22MB) = ~37MB.
+# Total backend: FastAPI ~20MB + PyMuPDF ~20MB + NLP ~37MB = ~77MB.
 
 # Core
 fastapi>=0.104.0
@@ -17,6 +17,18 @@ pydantic>=2.5.0
 
 # PDF extraction (murni Python, ~20MB)
 pymupdf>=1.23.0
+
+# NLP code detection (ONNX Runtime — BUKAN PyTorch)
+# onnxruntime: ~15MB, runs ONNX models on CPU, no GPU needed
+# tokenizers: ~5MB, Rust-based tokenizer, no Python ML framework
+# Model file (all-MiniLM-L6-v2 ONNX): ~22MB, downloaded on first use
+# Total NLP: ~42MB — fits Render free tier (512MB RAM)
+#
+# For Indonesian + multilingual support, change MODEL_NAME in nlp_classifier.py
+# to "paraphrase-multilingual-MiniLM-L12-v2" (~47MB ONNX model).
+onnxruntime>=1.16.0
+tokenizers>=0.15.0
+numpy>=1.24.0
 
 # Database
 psycopg2-binary>=2.9.0
@@ -28,7 +40,3 @@ python-jose[cryptography]>=3.3.0
 
 # Rate limiting
 slowapi>=0.1.9
-
-# NOTE: Tidak ada sentence-transformers/PyTorch/TensorFlow.
-# Ekstraksi kode 100% menggunakan pattern matching (regex) yang sudah
-# dioptimalkan. Lihat backend/app/pattern_extract.py untuk detail.
