@@ -167,6 +167,9 @@ export function isNarrativeLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
 
+  // Comments (# ...) are NEVER narrative — they're code
+  if (/^\s*#\s/.test(t)) return false;
+
   // Statistical narrative: "X-squared = 2.2222 menunjukkan bahwa..."
   if (isStatisticalNarrative(t)) return true;
 
@@ -255,9 +258,12 @@ export function isCodeLine(line: string): boolean {
     // Don't match citations like "Smith (2017);" or "see Author (2020);"
     if (!/[A-Z][a-z]+\s*\(\d{4}\)/.test(t)) return true;
   }
-  // FIX #4: Function call — only if NO prose words AND no citation pattern
+  // FIX #4: Function call — only if NO prose AND no citation AND has code operators
   if (/\b\w+\s*\([^)]*\)/.test(t) && !t.endsWith(":") && !t.endsWith(".")) {
-    if (proseRatio(t) === 0 && !/[A-Z][a-z]+\s*\(\d{4}\)/.test(t)) return true;
+    // Must have at least one code-specific operator to be code
+    const hasCodeOp = /<-|->|\$|::|%>%|#|;\s*$/.test(t);
+    const hasAssignment = /\w+\s*=\s*\w/.test(t);
+    if (proseRatio(t) === 0 && !/[A-Z][a-z]+\s*\(\d{4}\)/.test(t) && (hasCodeOp || hasAssignment)) return true;
   }
   return false;
 }
