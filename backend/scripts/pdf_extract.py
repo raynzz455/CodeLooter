@@ -810,21 +810,64 @@ def repair_line_wraps(text: str) -> str:
 
 
 def _should_join(cur: str, nxt: str) -> bool:
+    """Heuristic: should `cur` and `nxt` be joined into one logical line?
+
+    UPGRADED (Task 21) — ported from app/pattern_extract.py _should_join:
+    - opening-bracket protection (don't join when current is just `{` / `[` / `(`
+      — JSON objects/arrays/function calls)
+    - SQL clause continuation (FROM, JOIN, WHERE, SET, INTO, VALUES, ON, AND, OR, ...)
+    """
     cur_t = cur.rstrip()
     nxt_t = nxt.lstrip()
     if not cur_t or not nxt_t:
         return False
+    # Don't join if current ends with `;` (statement separator)
     if cur_t.endswith(";"):
         return False
+
+    # NEW: Don't join if current line is JUST an opening bracket ({, [, ()
+    # These are block openers (JSON objects, arrays, function calls), not
+    # continuation signals. Joining them with the next line would break JSON
+    # extraction and multi-line data structures.
+    if re.match(r"^[({\[]\s*$", cur_t):
+        return False
+
     opens = cur.count("(") + cur.count("[") + cur.count("{")
     closes = cur.count(")") + cur.count("]") + cur.count("}")
     if opens > closes:
         return True
+
+    # NEW: SQL continuation — if current line ends with a SQL clause keyword
+    # (FROM, JOIN, WHERE, SET, INTO, VALUES, ON, AND, OR), the next line is
+    # the continuation of the query. e.g. "SELECT * FROM\nusers WHERE x > 0".
+    if re.search(
+        r"\b(FROM|JOIN|INNER|OUTER|LEFT|RIGHT|WHERE|SET|INTO|VALUES|ON|AND|OR|"
+        r"GROUP|ORDER|HAVING|UNION|SELECT|INSERT|UPDATE|DELETE|CREATE|TABLE|"
+        r"ALTER|DROP)\s*$",
+        cur_t,
+        re.IGNORECASE,
+    ):
+        code_kw = re.compile(
+            r"^\s*(import|from|def|class|function|func|fn|return|if|else|elif|"
+            r"for|while|switch|case|break|continue|public|private|protected|static|"
+            r"void|int|float|double|long|string|var|let|const|print|printf|println|"
+            r"cout|cin|echo|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|TABLE|DROP|"
+            r"library|require|module|export|async|await|package|interface|struct|enum|"
+            r"namespace|using|include|extends|implements|new|throw|try|catch|finally|"
+            r"#|//|/\*|--)"
+        )
+        is_sentence_start = bool(re.match(r"^[A-Z][a-z]+\s+[a-z]", nxt_t)) and \
+            not bool(re.match(r"^\w+\s*\(", nxt_t))
+        if not code_kw.match(nxt_t) and not is_sentence_start:
+            return True
+
     if re.search(r"<-|->", nxt_t[:30]):
         return False
     if re.match(r"^[^=<>!]{1,20}=[^=]", nxt_t):
         return False
-    if re.search(r"[.!?:]$", cur_t):
+    if re.search(r"[.!?]$", cur_t):
+        return False
+    if re.search(r":$", cur_t) and not re.search(r"::$", cur_t):
         return False
     if re.search(r"[)\]}]$", cur_t):
         return False
@@ -852,7 +895,7 @@ def _should_join(cur: str, nxt: str) -> bool:
     if re.search(r"[a-zA-Z0-9_]$", cur_t) and re.match(r"^[)\]}]", nxt_t):
         return True
     if re.search(r"[a-z]$", cur_t) and re.match(r"^[a-z]{1,8}$", nxt_t):
-        if not re.search(r"<-=", cur_t) and not re.match(r"^.{0,40}=[^=]", cur_t):
+        if not re.search(r"<-=", cur_t) and not re.match(r"^.{0,40}=[^=]", nxt_t):
             return True
     return False
 
@@ -871,11 +914,39 @@ def strip_r_output(text: str) -> str:
 
 
 def normalize_whitespace(text: str) -> str:
+    """Normalize whitespace — removes PDF artifacts.
+
+    UPGRADED (Task 21): adds line-number prefix stripping and Python REPL
+    prompt stripping (`>>> ` and `... `).
+    """
     lines = text.split("\n")
     out = []
     for line in lines:
         line = line.replace("\r", "").rstrip()
         line = re.sub(r"[ \t]{2,}", " ", line).rstrip()
+        t = line.strip()
+
+        # Remove standalone page numbers (lines that are just digits)
+        if t and re.match(r"^\d+$", t):
+            continue
+
+        # NEW: Strip line number prefixes — common in PDF/textbook code listings.
+        # Pattern: "  1  def foo():" or "10 print('hi')" -> strip the leading number.
+        # Only strip if: (a) line starts with digits followed by 2+ spaces, AND
+        # (b) the rest of the line looks like code (has code-like characters).
+        line_num_match = re.match(r"^(\d+)\s{2,}(.+)$", t)
+        if line_num_match:
+            rest = line_num_match.group(2)
+            if re.search(r"[(){}\[\];=<>&|!,]", rest) or \
+               re.match(r"^\w+\s*=\s*", rest) or \
+               re.match(r"^\s*(def|function|func|fn|class|if|for|while|return|import|from|public|private|var|let|const|val)\b", rest):
+                line = re.sub(r"^\s*\d+\s{2,}", "", line)
+
+        # NEW: Strip Python REPL prompts (>>> and ...) — common in textbook examples.
+        repl_match = re.match(r"^(\s*)(>>>|\.\.\.)\s+(.+)$", line)
+        if repl_match:
+            line = repl_match.group(1) + repl_match.group(3)
+
         out.append(line)
     filtered = []
     for line in out:

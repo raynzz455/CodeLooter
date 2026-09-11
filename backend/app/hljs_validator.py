@@ -37,6 +37,32 @@ NARRATIVE_PATTERNS = [
     re.compile(r"^\s*Latihan\s+\d", re.IGNORECASE),
 ]
 
+# UPGRADED (Task 21): Patterns that are DEFINITELY narrative, even if they contain
+# = or (). Used as a pre-filter before pygments relevance scoring — matches lines
+# like "X-squared = 2.2222 menunjukkan bahwa..." that pygments would otherwise
+# mis-classify as code.
+# IMPORTANT: single-word Indonesian terms use \b word boundaries so they don't
+# match variable identifiers like `koefisien_variasi` or `signifikan_level`.
+STATISTICAL_NARRATIVE_PATTERNS = [
+    re.compile(r"menunjukkan\s+bahwa", re.IGNORECASE),
+    re.compile(r"karena\s+p.?value", re.IGNORECASE),
+    re.compile(r"\bH0\b.*diterima", re.IGNORECASE),
+    re.compile(r"\bH0\b.*ditolak", re.IGNORECASE),
+    re.compile(r"\bartinya\b", re.IGNORECASE),
+    re.compile(r"\bR.?squared\b", re.IGNORECASE),
+    re.compile(r"\bAdjusted\b", re.IGNORECASE),
+    re.compile(r"\bsignifikan\b(?!_)", re.IGNORECASE),
+    re.compile(r"\bkoefisien\b(?!_)", re.IGNORECASE),
+    re.compile(r"hubungan\s+asosiasi", re.IGNORECASE),
+    re.compile(r"\bpenyimpangan\b(?!_)", re.IGNORECASE),
+    re.compile(r"\bdiperkirakan\b", re.IGNORECASE),
+    re.compile(r"\bmeningkat\b", re.IGNORECASE),
+    re.compile(r"\bberkontribusi\b", re.IGNORECASE),
+    re.compile(r"\bmengindikasikan\b", re.IGNORECASE),
+    re.compile(r"\bvariabilitas\b(?!_)", re.IGNORECASE),
+    re.compile(r"\bdijelaskan\b", re.IGNORECASE),
+]
+
 _pygments_available = None
 
 
@@ -118,11 +144,21 @@ def validate_code_block(code: str) -> Dict:
 
 
 def validate_line(line: str) -> Dict:
-    """Validate a single line — useful for ambiguous lines."""
+    """Validate a single line — useful for ambiguous lines.
+
+    UPGRADED (Task 21): also filters statistical-narrative patterns
+    ("X-squared = ... menunjukkan bahwa ...") that pygments would otherwise
+    mis-classify as code.
+    """
     t = line.strip()
     
     # Pre-filter: narrative patterns are never code
     for pattern in NARRATIVE_PATTERNS:
+        if pattern.search(t):
+            return {"is_code": False, "relevance": 0, "language": None}
+
+    # Pre-filter (Task 21): statistical narrative patterns are never code
+    for pattern in STATISTICAL_NARRATIVE_PATTERNS:
         if pattern.search(t):
             return {"is_code": False, "relevance": 0, "language": None}
     
