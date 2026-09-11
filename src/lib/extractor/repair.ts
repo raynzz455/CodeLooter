@@ -54,6 +54,12 @@ function shouldJoin(cur: string, nxt: string): boolean {
   // Don't join if current ends with `;` (statement separator)
   if (/;$/.test(curT)) return false;
 
+  // NEW: Don't join if current line is JUST an opening bracket ({, [, ()
+  // These are block openers (JSON objects, arrays, function calls), not
+  // continuation signals. Joining them with the next line would break
+  // JSON extraction and multi-line data structures.
+  if (/^[({\[]\s*$/.test(curT)) return false;
+
   // Join if there are unclosed brackets on the current line
   const opens = (curT.match(/[([{]/g) || []).length;
   const closes = (curT.match(/[)\]}]/g) || []).length;
@@ -170,6 +176,29 @@ export function normalizeWhitespace(lines: string[]): string[] {
 
     // Remove standalone page numbers (lines that are just digits)
     if (t && /^\d+$/.test(t)) continue;
+
+    // NEW: Strip line number prefixes — common in PDF/textbook code listings.
+    // Pattern: "  1  def foo():" or "10 print('hi')" → strip the leading number.
+    // Only strip if: (a) line starts with digits followed by 2+ spaces, AND
+    // (b) the rest of the line looks like code (has code-like characters).
+    // This preserves lines like "year <- 2001" (no leading number+space gap).
+    const lineNumMatch = t.match(/^(\d+)\s{2,}(.+)$/);
+    if (lineNumMatch) {
+      const rest = lineNumMatch[2];
+      // Only strip if the rest looks like code (not a narrative sentence)
+      if (/[(){}\[\];=<>&|!,]/.test(rest) || /^\w+\s*=\s*/.test(rest) ||
+          /^\s*(def|function|func|fn|class|if|for|while|return|import|from|public|private|var|let|const|val)\b/.test(rest)) {
+        line = line.replace(/^\s*\d+\s{2,}/, "");
+      }
+    }
+
+    // NEW: Strip Python REPL prompts (>>> and ...) — common in textbook examples.
+    // ">>> fruits = ['apple']" → "fruits = ['apple']"
+    // "... fruits.append('date')" → "fruits.append('date')"
+    const replMatch = line.match(/^(\s*)(>>>|\.\.\.)\s+(.+)$/);
+    if (replMatch) {
+      line = replMatch[1] + replMatch[3];
+    }
 
     // Remove short "word + number" patterns that are PDF page artifacts
     // e.g. "halaman 42", "hal 12", "hal. 5", "page 3"

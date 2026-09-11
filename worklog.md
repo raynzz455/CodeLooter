@@ -1566,3 +1566,103 @@ Stage Summary:
 - **Current project status**: All extraction quality tests now pass at 100%. Five subtle edge cases fixed: comment-with-chi-square, quoted data strings, double-= equations, Indonesian variable names with narrative-word substrings, and SQL clause continuations. Marker deduplication prevents standalone lang="unknown" header blocks.
 - **Key fixes**: 6 targeted fixes in line-classify.ts (3), repair.ts (1), pattern-extract.ts (1), plus STATISTICAL_NARRATIVE_PATTERNS word-boundary update (1).
 - **Unresolved risks**: Dev server still crashes under browser load (4GB cgroup memory limit) — known issue. All extraction logic verified via direct API tests with curl (HTTP 200, correct JSON response).
+
+---
+Task ID: 18
+Agent: main (user request: don't test only with example PDFs, handle diverse document/language combinations)
+Task: Expand extractor to handle diverse real-world documents — many languages, structures, and combinations.
+
+Work Log:
+- User pointed out that the extractor was only tested with specific R statistics module examples. Real-world documents come in many forms: Java textbooks, Python notebooks, SQL scripts, C++ algorithms, JavaScript web apps, PHP backends, Bash deployment scripts, Go microservices, Rust CLI tools, Kotlin Android apps, TypeScript React components, HTML/CSS pages, JSON configs, MATLAB scripts, multi-language docs, pseudocode, REPL output, code with line numbers, etc.
+
+**Step 1: Diverse Test Suite**
+- Created `/tmp/diverse_test.ts` with 20 test cases covering 15+ languages and document structures.
+- Initial result: 92/138 checks passed (67%) — massive gaps identified.
+
+**Step 2: Expand langdetect.ts**
+- Added comprehensive signal arrays for 12 new languages: Java, C++, JavaScript, TypeScript, PHP, Bash, Go, Rust, Kotlin, HTML, CSS, JSON, MATLAB.
+- Rewrote `detectLanguage()` with:
+  - Fast-path structural detection (JSON/HTML/CSS) using line-by-line pattern matching
+  - PHP `<?php` tag detection before HTML
+  - Bash shebang detection
+  - TypeScript type annotation check (must have `: Type`, `interface`, `type X =`, `as Type` — NOT just `<>` which Rust uses for `Vec<T>`)
+  - High-priority distinctive keyword checks in order: Rust → Go → Kotlin → C++ → Java → Python → R
+  - Removed `print()` from PHP signals (too common across languages)
+  - Added Python-specific list methods (`.append()`, `.extend()`, `.sort()`, etc.) to distinguish from Go's `append()`
+
+**Step 3: Expand line-classify.ts isCodeLine()**
+- Added 150+ new code patterns covering all 15 languages:
+  - Shebang detection: `#!/`
+  - Java: `public/private/protected class`, `System.out.`, `this.`, `super.`, `@Override`, `throws`, `extends`, `implements`
+  - C++: `#include`, `#define`, `std::`, `cout <<`, `cin >>`, `template <`, `using namespace`, `::`, `->`
+  - JavaScript/TypeScript: `const/let/var`, `function`, `=>`, `console.`, `document.`, `require()`, `module.exports`, `export default`, `async/await`, `interface`, `type X =`
+  - PHP: `<?php`, `$variable`, `->`, `::`, `echo`, `public function`, `namespace`, `use \`
+  - Bash: `#!/bin/bash`, `set -e`, `echo`, `if [`, `fi`, `for...in`, `done`, `case...in`, `esac`, `export`, `cd`, `git`, `npm`, `systemctl`, `docker`, `tar`, `curl`, `wget`
+  - Go: `package`, `func`, `import (`, `:=`, `fmt.`, `http.`, `log.`, `defer`, `go func`, `chan`, `select {`, `err != nil`
+  - Rust: `use std::`, `fn`, `let mut`, `pub fn`, `println!`, `impl`, `match`, `struct`, `enum`, `trait`, `Some()`, `None`, `Ok()`, `Err()`, `.unwrap()`
+  - Kotlin: `fun`, `val`, `var`, `class`, `data class`, `object`, `companion object`, `override fun`, `lateinit`, `when`, `init {}`
+  - HTML: `<!DOCTYPE`, `<html>`, `<head>`, `<body>`, `<div>`, `<script>`, `<style>`, `<p>`, `<h1-6>`, `</tag>`
+  - CSS: `.class {`, `#id {`, `@media`, `@import`, `property: value;`, `!important`, `linear-gradient()`
+  - JSON: `{`, `}`, `[`, `]`, `"key":`, `"key": value`
+  - MATLAB: `% comment`, `figure;`, `subplot()`, `plot()`, `xlabel()`, `disp()`, `fprintf()`, `function`, `end`, `grid on`, `butter()`, `filtfilt()`, `fft()`
+  - Array literal assignment: `var = [...]`
+  - Dict literal assignment: `var = {...}`
+  - Array destructuring: `[a, b] = ...`
+  - Variable = function call: `filtered = filtfilt(b, a, signal)`
+  - Method call: `plt.figure(...)`, `fruits.append(...)`
+  - Attribute access: `self.items = []`
+
+**Step 4: Expand isNarrativeLine()**
+- Added comment-style detection for all languages: `#`, `//`, `/*`, `<!--`, `%` (MATLAB)
+- Added language-specific keyword checks to override narrative classification
+
+**Step 5: Fix repair.ts**
+- Fixed `shouldJoin()`: don't join when current line is just an opening bracket (`{`, `[`, `(`) — prevents JSON lines from being merged
+- Added Python REPL prompt stripping (`>>> ` and `... ` prefixes)
+- Added line number prefix stripping (`  1  def foo():` → `def foo():`)
+
+**Step 6: Fix pattern-extract.ts**
+- Added `stripNarrative()` function: strips leading/trailing narrative lines and markdown headings from blocks
+- Added `isMarkdownHeading()` function: detects title-case `#` lines as headings (not code comments)
+- Added multi-section splitting: `## 1. Title`, `### 1.1 Subtitle` recognized as split markers
+- Added section headers to CODE_START_PATTERNS: `## N.`, shebang, `<?php`, `<!DOCTYPE`, `{` (JSON), `package`, `#include`, `import`
+- Fixed candidate `startLine`/`endLine` to use actual first/last code line positions (not range boundaries) — fixes merge gap calculation
+- Added structural language bypass: JSON/HTML/CSS/SQL/PHP/Bash blocks skip hljs validation (hljs doesn't recognize them well)
+- Added Python/JS fallback signal counting in validation
+- Reduced MARKER_DEDUP_GAP from 3 to 2 (prevents eating JSON `{` markers)
+- Fixed SPLIT_PATTERN: added `## N.` and title-case heading patterns
+
+**Step 7: Fix isROutput()**
+- CRITICAL FIX: `## 1. Query Data` was being stripped as R console output because `isROutput` matched any `## ` line
+- Now excludes markdown headings: `## N. Title` and `## TitleCase` are NOT R output
+- This was the root cause of multi-section docs being merged into 1 block
+
+**Step 8: Fix language detection priority**
+- Python checked BEFORE Go (Go's `return` signal was catching Python code)
+- Rust checked BEFORE C++ (C++ `::` was catching Rust code)
+- TypeScript checked BEFORE HTML (HTML `<div>` was catching TSX)
+- Kotlin checked BEFORE Java (Java `class` was catching Kotlin)
+- Added Python-specific `.append()` detection to distinguish from Go's `append()`
+
+- Verified:
+  - Diverse test: 136/138 passed (99%) ✓ (was 67%)
+  - Original verify: 9/9 passed (100%) ✓
+  - Quality verify: 50/50 passed (100%) ✓
+  - Edge case audit: 33/33 passed (100%) ✓
+  - Lint: passes cleanly ✓
+
+Stage Summary:
+- **Current project status**: The extractor now handles 15 programming languages across diverse document types — Java textbooks, Python notebooks, SQL schemas, C++ algorithms, JavaScript web apps, PHP backends, Bash scripts, Go microservices, Rust CLI tools, Kotlin Android apps, TypeScript React components, HTML/CSS pages, JSON configs, MATLAB scripts, and multi-language documents. All 15 languages have comprehensive code detection patterns and proper language classification.
+- **Key improvements**: 
+  1. 12 new language signal arrays in langdetect.ts
+  2. 150+ new code patterns in line-classify.ts
+  3. Multi-section splitting on `## N.` headers
+  4. Line number prefix stripping
+  5. Python REPL prompt stripping
+  6. JSON/HTML/CSS structural detection
+  7. Markdown heading detection (not R output)
+  8. Narrative stripping from merged blocks
+  9. Proper language detection priority (Python before Go, Rust before C++, TS before HTML)
+- **Unresolved risks**: 
+  - 2 minor test failures: SQL comments (`-- Created: 2024`) leak into output (they ARE valid SQL comments), and markdown table code blocks aren't split into separate blocks.
+  - Dev server memory issues (4GB cgroup) — all logic verified via direct tests.

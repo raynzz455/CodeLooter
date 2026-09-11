@@ -22,6 +22,7 @@ import {
   isCodeLine,
   isROutput,
   isStartMarker,
+  proseRatio,
 } from "./line-classify";
 import { detectLanguage } from "./langdetect";
 import { repairLineWraps, normalizeWhitespace, stripROutputLines } from "./repair";
@@ -57,12 +58,14 @@ function findStartPositions(lines: string[]): number[] {
     }
   }
   // Deduplicate: if two start markers are within a few lines of each other
-  // (e.g. "# Kasus 1:" on line 12 and "Kode Penyelesaian:" on line 14), keep
+  // (e.g. "# Kasus 1:" on line 0 and "Kode Penyelesaian:" on line 2), keep
   // only the FIRST one. They represent the same logical block start — the
   // second is just a label introducing the code. Without this dedup, the first
   // range would contain only 1 code line and get skipped, causing the header
   // comment to leak out as a standalone lang="unknown" block.
-  const MARKER_DEDUP_GAP = 3;
+  // Gap of 2 is enough for "# Kasus 1:" + blank + "Kode Penyelesaian:".
+  // Larger gaps would eat unrelated markers like JSON "{" blocks.
+  const MARKER_DEDUP_GAP = 2;
   const deduped: number[] = [];
   for (const p of positions) {
     if (deduped.length === 0 || p - deduped[deduped.length - 1] > MARKER_DEDUP_GAP) {
@@ -124,7 +127,8 @@ function stripROutput(code: string): { code: string; stripped: number } {
 // becomes its own block. Also matches "Kasus N" without leading # (common
 // in PDF-extracted text where the # was lost) and "data_xxx <- data.frame"
 // (each data.frame assignment starts a new logical block).
-const SPLIT_PATTERN = /(?:^[ \t]*#[Kk]asus\s+\d|^[ \t]*#[Cc]ontoh\s+\d|^[ \t]*#[Kk]orelasi\s+[Pp]earson\s+contoh|^[ \t]*#korelasi\s+pearson\s+contoh\s*\d|^[ \t]*data_\w+\s*<-?\s*data\.frame|^[ \t]*data_\w+\s*=\s*data\.frame|^[ \t]*Kasus\s+\d|^[ \t]*Contoh\s+\d|^[ \t]*Soal\s+\d|^[ \t]*Latihan\s+\d|^[ \t]*Praktikum\s+\d|^[ \t]*Tugas\s+\d)/m;
+// Also splits on "## N." section headers (e.g. "## 1. Query Data", "## 2. Analisis").
+const SPLIT_PATTERN = /(?:^[ \t]*#[Kk]asus\s+\d|^[ \t]*#[Cc]ontoh\s+\d|^[ \t]*#[Kk]orelasi\s+[Pp]earson\s+contoh|^[ \t]*#korelasi\s+pearson\s+contoh\s*\d|^[ \t]*data_\w+\s*<-?\s*data\.frame|^[ \t]*data_\w+\s*=\s*data\.frame|^[ \t]*Kasus\s+\d|^[ \t]*Contoh\s+\d|^[ \t]*Soal\s+\d|^[ \t]*Latihan\s+\d|^[ \t]*Praktikum\s+\d|^[ \t]*Tugas\s+\d|^[ \t]*#{1,4}\s+\d+\.\s+|^[ \t]*#{1,4}\s+\d+\.\d+\s+|^[ \t]*#{1,4}\s+[A-Z][a-z]+(?:\s+\w+){0,3}\s*$)/m;
 
 function splitOnMarkers(block: RawBlock): RawBlock[] {
   const code = block.code;
@@ -292,14 +296,31 @@ export function extractCodeBlocksFromText(
     if (codeLines.length >= 2) {
       const code = codeLines.join("\n").trim();
       if (code.length >= 10) {
+        // Find the actual start line (first code line) and end line (last code line)
+        // This is important for the merge step to correctly calculate gaps between blocks.
+        // Using the range start (heading line) would make gaps appear empty.
+        let actualStart = start;
+        let actualEnd = end - 1;
+        for (let j = start; j < end; j++) {
+          if (isCodeLine(lines[j]) || isROutput(lines[j])) {
+            actualStart = j;
+            break;
+          }
+        }
+        for (let j = end - 1; j >= start; j--) {
+          if (isCodeLine(lines[j]) || isROutput(lines[j])) {
+            actualEnd = j;
+            break;
+          }
+        }
         candidates.push({
           code,
           lang: detectLanguage(code),
           lines: code.split("\n").length,
           source: "pattern",
           page: 1,
-          startLine: start,
-          endLine: end - 1,
+          startLine: actualStart,
+          endLine: actualEnd,
         });
       }
     }
@@ -383,11 +404,81 @@ export function extractCodeBlocksFromText(
   stats.mergedBlocks = mergeStats.mergedCount;
 
   // ── Phase 1 Fix #4: consistent R-output stripping + hljs validation ──
+  // First, strip leading/trailing narrative lines that may have leaked into
+  // blocks via the merge step. A narrative line is one that is NOT a code line
+  // and NOT an R-output line.
+  // Also strip markdown headings (# Title) that look like headings, not code
+  // comments. A heading is a `#` line that is followed by a blank line or is
+  // title-case (all major words capitalized).
+  const isMarkdownHeading = (line: string): boolean => {
+    const t = line.trim();
+    // Must start with 1-6 # followed by space
+    if (!/^#{1,6}\s+/.test(t)) return false;
+    // Remove the # prefix
+    const content = t.replace(/^#{1,6}\s+/, "");
+    // If content is title-case (all major words start with uppercase), it's a heading
+    const words = content.split(/\s+/);
+    if (words.length === 0) return false;
+    // Check if most words are capitalized (title case) — indicates heading
+    let capitalized = 0;
+    let total = 0;
+    for (const w of words) {
+      if (/^[A-Za-z]/.test(w)) {
+        total++;
+        if (/^[A-Z]/.test(w)) capitalized++;
+      }
+    }
+    if (total >= 2 && capitalized / total >= 0.6) return true;
+    // Also check prose ratio — headings often have prose words
+    if (proseRatio(content) > 0.3) return true;
+    return false;
+  };
+
+  const stripNarrative = (code: string): string => {
+    const lines = code.split("\n");
+    // Strip leading narrative AND markdown headings
+    while (lines.length > 0) {
+      const first = lines[0];
+      if (!first.trim()) { lines.shift(); continue; }
+      if (isMarkdownHeading(first)) { lines.shift(); continue; }
+      if (!isCodeLine(first) && !isROutput(first)) { lines.shift(); continue; }
+      break;
+    }
+    // Strip trailing narrative AND markdown headings
+    while (lines.length > 0) {
+      const last = lines[lines.length - 1];
+      if (!last.trim()) { lines.pop(); continue; }
+      if (isMarkdownHeading(last)) { lines.pop(); continue; }
+      if (!isCodeLine(last) && !isROutput(last)) { lines.pop(); continue; }
+      break;
+    }
+    return lines.join("\n").trim();
+  };
+
   const finalBlocks: RawBlock[] = [];
   for (const b of merged) {
-    const { code, stripped } = stripROutput(b.code);
+    const noNarrative = stripNarrative(b.code);
+    const { code, stripped } = stripROutput(noNarrative);
     stats.strippedROutput += stripped;
     if (code.length >= 10 && code.split("\n").length >= 1) {
+      // First, check our own language detection — if we're confident about
+      // the language (json, html, css, sql, php, bash, etc.), skip hljs
+      // validation because hljs may not recognize structural languages well.
+      const detectedLang = detectLanguage(code);
+      const isStructural = ["json", "html", "css", "sql", "php", "bash"].includes(detectedLang);
+
+      if (isStructural) {
+        // For structural languages, trust our own detection
+        finalBlocks.push({
+          code,
+          lang: detectedLang,
+          lines: code.split("\n").length,
+          source: b.source,
+          page: b.page,
+        });
+        continue;
+      }
+
       // Layer 2: Validate with highlight.js — is this really code?
       const validation = validateCodeBlock(code);
       if (validation.isCode) {
@@ -400,11 +491,17 @@ export function extractCodeBlocksFromText(
         });
       } else {
         // Low relevance — might be narrative that leaked through.
-        // Only keep if the block has strong R signals (our own detection).
+        // Only keep if the block has strong code signals (our own detection).
         const rHits = (code.match(/<-/g) || []).length +
                       (code.match(/library\s*\(/g) || []).length +
                       (code.match(/\bprint\s*\(/g) || []).length;
-        if (rHits >= 2) {
+        const pyHits = (code.match(/\bdef\s+\w+/g) || []).length +
+                       (code.match(/\bimport\s+\w+/g) || []).length +
+                       (code.match(/\bself\.\w+/g) || []).length;
+        const jsHits = (code.match(/\b(const|let|var)\s+\w+/g) || []).length +
+                       (code.match(/function\s+\w+/g) || []).length +
+                       (code.match(/console\.\w+/g) || []).length;
+        if (rHits >= 2 || pyHits >= 2 || jsHits >= 2) {
           finalBlocks.push({
             code,
             lang: detectLanguage(code),
