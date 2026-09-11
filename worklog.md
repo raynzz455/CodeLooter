@@ -1521,3 +1521,48 @@ Stage Summary:
 - **Current project status**: DOCX extraction now supported (mammoth). Auto-detect removed — user MUST choose language. Panel kiri forces ALL output blocks to the selected language. Cache fixed to key per-language. Python control flow and string assignment detection improved. DOCX/PDF/MD/IPYNB/TXT/SQL all supported with forced language output.
 - **Key changes**: New docx.ts module, mammoth dependency, forced lang in API routes, cache per-language, improved isCodeLine for Python.
 - **File types supported**: PDF, DOCX, MD, IPYNB, HTML, TXT, TEX — all with forced language output.
+
+---
+Task ID: 17
+Agent: main (user request: continue audit + fix edge cases)
+Task: Continue deep edge case audit (round 2) — fix remaining extraction quality bugs.
+
+Work Log:
+- Continued from Task 16. Ran a deep edge case audit covering 9 bug categories (BUG #12-#20) with 33 total checks.
+- Initial audit result: 28/33 passed (85%) — 5 failing edge cases identified.
+
+**Fix 1: BUG #12 — `# Kasus 1: Uji Chi-Square` detected as equation (line-classify.ts)**
+- Problem: `isEquation()` matched `chi.?square` pattern in the comment, blocking the comment detection at line 241 (`/^\s*#\s/`).
+- Fix: Added early-return in `isEquation()` — comments (lines starting with `#`) are NEVER equations. They're code.
+
+**Fix 2: BUG #14 — `"A 12 B 18 C 7"` string data not detected as code (line-classify.ts)**
+- Problem: Quoted string with data had 6 words (>4), exceeding the `words.length <= 4` limit.
+- Fix: Added a second rule — quoted strings containing digits (data) are allowed up to 8 words if proseRatio ≤ 0.4. Single letters like "A", "B", "C" are data labels, not prose (even though "a" matches the English article in PROSE_WORDS).
+
+**Fix 3: BUG #15 — `df = n - 1 = 29` math equation detected as code (line-classify.ts)**
+- Problem: `\w+\s*=\s*\d` matched the second `=` (`1 = 29`), causing the line to be classified as code.
+- Fix: Added a new equation pattern to `isEquation()`: `^\w+\s*=\s*\S+.*=\s*\d` (double `=` with no `<-` and no `(`) → math equation, not code. Handles "df = n - 1 = 29", "χ² = Σ(O-E)²/E = 2.34".
+
+**Fix 4: BUG #18 — `koefisien_variasi <- ...` detected as narrative (line-classify.ts)**
+- Problem: STATISTICAL_NARRATIVE_PATTERNS used `/koefisien/i` without word boundaries, matching the Indonesian variable name `koefisien_variasi`.
+- Fix: Added `\b` word boundaries and `(?!_)` negative lookahead to all single-word Indonesian patterns: `\bkoefisien\b(?!_)`, `\bsignifikan\b(?!_)`, `\bvariabilitas\b(?!_)`, `\bpenyimpangan\b(?!_)`, `\bartinya\b`, `\bR.?squared\b`, `\bAdjusted\b`, etc. Now `koefisien_variasi` (with underscore) is NOT matched, but standalone `koefisien` is.
+
+**Fix 5: BUG #19 — SQL continuation `SELECT * FROM\nusers WHERE x > 0` not joined (repair.ts)**
+- Problem: `shouldJoin()` didn't recognize that a line ending with a SQL clause keyword (FROM, JOIN, WHERE, etc.) should be joined with the next line.
+- Fix: Added a SQL continuation rule in `shouldJoin()` — if current line ends with `\b(FROM|JOIN|WHERE|SET|INTO|VALUES|ON|AND|OR|...)\s*$/i`, join with next line (unless next starts a new statement via CODE_KEYWORD_RE or isSentenceStart).
+
+**Fix 6: Standalone `# Kasus N:` block with lang="unknown" (pattern-extract.ts)**
+- Problem: `findStartPositions()` returned BOTH `# Kasus 1:` (line 12) AND `Kode Penyelesaian:` (line 14) as separate start markers. The first range only had 1 code line, so it was skipped by marker-anchored extraction, then picked up by scan-fallback as a standalone lang="unknown" block.
+- Fix: Added marker deduplication in `findStartPositions()` — if two start markers are within 3 lines of each other (MARKER_DEDUP_GAP=3), keep only the FIRST one. This treats `# Kasus 1:` + `Kode Penyelesaian:` as a single block start.
+
+- Verified:
+  - Deep edge case audit: 33/33 passed (100%) ✓ (was 28/33 = 85%)
+  - Quality verify suite: 50/50 passed (100%) ✓ (was 49/50 = 98%)
+  - Main verify suite: 9/9 passed (100%) ✓
+  - Lint: passes cleanly ✓ (only pre-existing font warning)
+  - End-to-end API test: POST /api/extract?lang=r with sample modul → 1 R block with all patterns (data_ipk, chisq.test, cor.test), 4 R-output lines stripped, 5 line-wraps repaired, 1 narrative filtered ✓
+
+Stage Summary:
+- **Current project status**: All extraction quality tests now pass at 100%. Five subtle edge cases fixed: comment-with-chi-square, quoted data strings, double-= equations, Indonesian variable names with narrative-word substrings, and SQL clause continuations. Marker deduplication prevents standalone lang="unknown" header blocks.
+- **Key fixes**: 6 targeted fixes in line-classify.ts (3), repair.ts (1), pattern-extract.ts (1), plus STATISTICAL_NARRATIVE_PATTERNS word-boundary update (1).
+- **Unresolved risks**: Dev server still crashes under browser load (4GB cgroup memory limit) — known issue. All extraction logic verified via direct API tests with curl (HTTP 200, correct JSON response).

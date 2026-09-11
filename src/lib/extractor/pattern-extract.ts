@@ -56,17 +56,30 @@ function findStartPositions(lines: string[]): number[] {
       continue;
     }
   }
+  // Deduplicate: if two start markers are within a few lines of each other
+  // (e.g. "# Kasus 1:" on line 12 and "Kode Penyelesaian:" on line 14), keep
+  // only the FIRST one. They represent the same logical block start — the
+  // second is just a label introducing the code. Without this dedup, the first
+  // range would contain only 1 code line and get skipped, causing the header
+  // comment to leak out as a standalone lang="unknown" block.
+  const MARKER_DEDUP_GAP = 3;
+  const deduped: number[] = [];
+  for (const p of positions) {
+    if (deduped.length === 0 || p - deduped[deduped.length - 1] > MARKER_DEDUP_GAP) {
+      deduped.push(p);
+    }
+  }
   // Fallback: if no marker at all, seed with the first code line.
-  if (positions.length === 0) {
+  if (deduped.length === 0) {
     for (let i = 0; i < lines.length; i++) {
       if (isCodeLine(lines[i])) {
-        positions.push(i);
+        deduped.push(i);
         break;
       }
     }
   }
-  positions.sort((a, b) => a - b);
-  return positions;
+  deduped.sort((a, b) => a - b);
+  return deduped;
 }
 
 // Strip R-output lines from head and tail; collapse interior R-output gaps

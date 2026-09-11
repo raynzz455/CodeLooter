@@ -59,6 +59,14 @@ function shouldJoin(cur: string, nxt: string): boolean {
   const closes = (curT.match(/[)\]}]/g) || []).length;
   if (opens > closes) return true;
 
+  // FIX #19: SQL continuation — if current line ends with a SQL clause keyword
+  // (FROM, JOIN, WHERE, SET, INTO, VALUES, ON, AND, OR), the next line is the
+  // continuation of the query. e.g. "SELECT * FROM\nusers WHERE x > 0".
+  if (/\b(FROM|JOIN|INNER|OUTER|LEFT|RIGHT|WHERE|SET|INTO|VALUES|ON|AND|OR|GROUP|ORDER|HAVING|UNION|SELECT|INSERT|UPDATE|DELETE|CREATE|TABLE|ALTER|DROP)\s*$/i.test(curT)) {
+    // But don't join if next starts a brand-new statement
+    if (!CODE_KEYWORD_RE.test(nxtT) && !isSentenceStart(nxtT)) return true;
+  }
+
   // Don't join if next starts with assignment arrow (new statement)
   if (/<-|->/.test(nxtT.slice(0, 30))) return false;
 

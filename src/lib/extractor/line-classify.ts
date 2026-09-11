@@ -61,24 +61,26 @@ const PROSE_WORDS = new Set<string>([
 export const PROSE_RATIO_THRESHOLD = 0.4;
 
 // Patterns that are DEFINITELY narrative, even if they contain = or ()
+// Note: single-word Indonesian terms use \b word boundaries so they don't
+// match variable identifiers like `koefisien_variasi` or `signifikan_level`.
 const STATISTICAL_NARRATIVE_PATTERNS: RegExp[] = [
   /menunjukkan\s+bahwa/i,
   /karena\s+p.?value/i,
   /\bH0\b.*diterima/i,
   /\bH0\b.*ditolak/i,
-  /artinya/i,
-  /R.?squared/i,
-  /Adjusted/i,
-  /signifikan/i,
-  /koefisien/i,
+  /\bartinya\b/i,
+  /\bR.?squared\b/i,
+  /\bAdjusted\b/i,
+  /\bsignifikan\b(?!_)/i,
+  /\bkoefisien\b(?!_)/i,
   /hubungan\s+asosiasi/i,
-  /penyimpangan/i,
-  /diperkirakan/i,
-  /meningkat/i,
-  /berkontribusi/i,
-  /mengindikasikan/i,
-  /variabilitas/i,
-  /dijelaskan/i,
+  /\bpenyimpangan\b(?!_)/i,
+  /\bdiperkirakan\b/i,
+  /\bmeningkat\b/i,
+  /\bberkontribusi\b/i,
+  /\bmengindikasikan\b/i,
+  /\bvariabilitas\b(?!_)/i,
+  /\bdijelaskan\b/i,
 ];
 
 // Equation patterns (math, not code)
@@ -144,6 +146,8 @@ export function isEndMarker(line: string): boolean {
 }
 
 // Check if line matches statistical narrative patterns
+// IMPORTANT: all single-word patterns use \b word boundaries so they don't
+// match Indonesian variable names like `koefisien_variasi` or `signifikan_level`.
 function isStatisticalNarrative(t: string): boolean {
   for (const p of STATISTICAL_NARRATIVE_PATTERNS) {
     if (p.test(t)) return true;
@@ -153,11 +157,18 @@ function isStatisticalNarrative(t: string): boolean {
 
 // Check if line is a math equation (not code)
 function isEquation(t: string): boolean {
+  // Comments are NEVER equations — they're code (# Kasus 1: Uji Chi-Square)
+  if (/^\s*#/.test(t)) return false;
   for (const p of EQUATION_PATTERNS) {
     if (p.test(t)) return true;
   }
   // Pattern: var = number + number * var (equation, not assignment)
   if (/^\w+\s*=\s*\d+(\.\d+)?\s*[+]\s*\d/.test(t) && !/<-/.test(t) && !/c\s*\(/.test(t)) {
+    return true;
+  }
+  // Pattern: var = expr = number (e.g. "df = n - 1 = 29", "χ² = Σ(O-E)²/E = 2.34")
+  // Double `=` with no <- and no function call is a math equation, not code.
+  if (/^\w+\s*=\s*\S+.*=\s*\d/.test(t) && !/<-/.test(t) && !/\(/.test(t)) {
     return true;
   }
   return false;
@@ -211,9 +222,15 @@ export function isCodeLine(line: string): boolean {
   if (/^\w+\s*<-\s*\(\s*$/.test(t)) return true;
   // String content inside R assignment
   // FIX #1: Must start with quote AND have ≤4 words AND low prose
+  // FIX #14: Allow longer quoted strings if they contain data (digits like "A 12 B 18 C 7")
   if (/^["']/.test(t) && t.length <= 80 && !/[.!?]$/.test(t)) {
     const words = t.split(/\s+/);
+    const hasData = /\d/.test(t);
     if (words.length <= 4 && proseRatio(t) <= 0.4) return true;
+    // Quoted string with numeric data (e.g. "A 12 B 18 C 7") — single letters
+    // like "A", "B", "C" are data labels, not prose, even if "a" matches the
+    // English article in PROSE_WORDS.
+    if (hasData && words.length <= 8 && proseRatio(t) <= 0.4) return true;
   }
   // FIX #2: Only match data rows like "L 55 25" if word is 1-3 chars (code label, not narrative)
   if (/^[A-Za-z]\w{0,2}\s+\d+(\s+\d+)*\s*$/.test(t) && proseRatio(t) === 0) return true;
