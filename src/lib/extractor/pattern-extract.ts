@@ -226,29 +226,41 @@ export function extractCodeBlocksFromText(
       // Skip standalone label lines.
       if (/^\s*(Kode\s+[Pp]enyelesaian|Kode\s*:)\s*:?\s*$/i.test(t)) continue;
 
-      // String context: if we're inside a multi-line string, capture everything
-      // until the closing quote.
+      // String context: if we're inside a multi-line string/expression,
+      // capture everything until closing quote or closing paren.
       if (insideString) {
         codeLines.push(line);
         // Check if this line contains the closing quote.
-        // Count unescaped quotes — if odd number, string closes on this line.
         const quoteCount = (t.match(/"/g) || []).length;
-        if (quoteCount % 2 === 1) {
+        // Check if this line contains closing paren for R assignment
+        const hasCloseParen = /\)\s*$/.test(t);
+        if (quoteCount % 2 === 1 || hasCloseParen) {
           insideString = false;
         }
         continue;
       }
 
-      // Check if this line opens a multi-line string (has odd number of quotes).
+      // Check if this line opens a multi-line string.
+      // R uses: var = ( "..." or var <- "..." or var = "..."
+      // Also check for: var = ( without quotes (R style data assignment)
       const quoteCount = (t.match(/"/g) || []).length;
       const isCode = isCodeLine(line) || isROutput(line);
 
-      if (isCode) {
+      // Also detect: var = ( — R style multi-line assignment without quotes
+      // e.g., data_ipk = ( \n  "..." \n ")
+      const isRAssignment = /^\s*\w+\s*=\s*\(\s*$/.test(t) || /^\s*\w+\s*<-\s*\(\s*$/.test(t);
+
+      if (isCode || isRAssignment) {
         codeLines.push(line);
         // If line has assignment with opening quote but no closing quote,
         // we're inside a string.
         if (quoteCount % 2 === 1 && /=\s*"/.test(t)) {
           insideString = true;
+        }
+        // Also: if line is "var = (" without closing paren, we're inside
+        // a multi-line expression — capture until we see the closing ")").
+        if (isRAssignment) {
+          insideString = true; // treat as string context (capture all)
         }
       } else {
         // Not code and not in string — but check if it's string content

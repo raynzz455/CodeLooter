@@ -33,13 +33,38 @@ const NARRATIVE_PATTERNS = [
   /^\s*Referensi\s*:/i,   // "Referensi:"
   /^\s*Penugasan\s*:/i,   // "Penugasan:"
   /^\s*Interpretasi\s*:/i,// "Interpretasi:"
+  /^\s*Interpretasi\s+Hasil/i, // "Interpretasi Hasil"
   /^\s*Output\s+yang\s+dihasilkan/i,
+  /^\s*Output\s+yang\s+dihasilkan\s*:/i,
   /^\s*Penjelasan\s*:/i,
   /^\s*Analisis\s*:/i,
   /^\s*Kesimpulan\s*:/i,
   /^\s*Kasus\s+\d/i,      // "Kasus 1:" header
   /^\s*Contoh\s+\d/i,    // "Contoh 1:" header
   /^\s*Latihan\s+\d/i,    // "Latihan 1:" header
+  /^\s*Kode\s+[Pp]enyelesaian/i, // "Kode Penyelesaian:"
+  /^\s*Kode\s+penyelesaiain/i,    // typo variant
+  /^\s*Kode\s*:/i,
+  // Narrative with statistical terms (false positive prone)
+  /menunjukkan\s+bahwa/i,  // "menunjukkan bahwa..."
+  /karena\s+p.?value/i,   // "karena p-value..."
+  /diterima/i,             // "H0 diterima"
+  /ditolak/i,              // "H0 ditolak"
+  /Artinya/i,              // "Artinya, ..."
+  /R.?squared/i,           // "R-squared = 0.667"
+  /Adjusted/i,             // "Adjusted R-squared"
+  /signifikan/i,           // "signifikan secara statistik"
+  /koefisien/i,            // "koefisien..."
+  /variabel/i,             // "variabel..."
+  /peubah/i,               // "peubah..."
+  /hipotesis/i,            // "hipotesis..."
+  /taraf/i,                // "taraf nyata 5%"
+  /sampel/i,               // "sampel data..."
+  /penelitian/i,           // "penelitian..."
+  /mahasiswa/i,            // "mahasiswa..."
+  /dosen/i,                // "dosen..."
+  /university/i,
+  /hubungan\s+asosiasi/i, // "hubungan asosiasi"
 ];
 
 export interface ValidationResult {

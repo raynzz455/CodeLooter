@@ -179,6 +179,16 @@ export function isCodeLine(line: string): boolean {
   if (/\w+\s*=\s*\d/.test(t) && !/^\s*(if|while|for)\s/.test(t)) return true;
   // String assignment: var = "..." or var = '...' (R/Python/JS)
   if (/^\w+\s*=\s*["']/.test(t)) return true;
+  // R-style assignment: var = ( — opens a multi-line expression
+  // e.g., data_ipk = ( \n  "..." \n ")
+  if (/^\w+\s*=\s*\(\s*$/.test(t)) return true;
+  if (/^\w+\s*<-\s*\(\s*$/.test(t)) return true;
+  // String content inside R assignment (indented, inside quotes)
+  // e.g., "Jp cumlaude tidak or L 55 25 or ") 
+  // Note: t is already trimmed, so check for quote at start
+  if (/^["']/.test(t)) return true; // line starts with quote (string content)
+  if (/^\w+\s+\d+(\s+\d+)*\s*$/.test(t)) return true; // data row: L 55 25
+  if (/^\)/.test(t)) return true; // closing: ") or )
   // Multi-variable assignment: var1, var2 = ... (Python tuple unpacking)
   if (/^\w+\s*(,\s*\w+)+\s*=/.test(t)) return true;
   // Index/bracket assignment: var = data[...] or var = data[...][...]
@@ -190,8 +200,9 @@ export function isCodeLine(line: string): boolean {
   // R function call with $ accessor: data$column
   if (/\$\w+/.test(t) && /[()]/.test(t)) return true;
   // Continuation lines (indented, ending with comma/operator) — these are
-  // part of a multi-line function call.
-  if (/^\s+\w+\s*=/.test(t) && /[,)]\s*$/.test(t)) return true;
+  // part of a multi-line function call. After trimming, check for
+  // word = value ending with comma or closing paren.
+  if (/^\w+\s*=/.test(t) && /[,)]\s*$/.test(t)) return true;
   if (/^\s+["'].*["']/.test(t)) return true; // indented string content
 
   // Python signals
