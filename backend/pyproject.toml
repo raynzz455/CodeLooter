@@ -1,8 +1,8 @@
 [project]
 name = "codelooter-backend"
-version = "0.3.0"
-description = "CodeLooter FastAPI backend — extract code blocks from documents"
-requires-python = ">=3.11"
+version = "0.4.0"
+description = "CodeLooter FastAPI backend — extract code blocks from documents with multi-layer accuracy"
+requires-python = ">=3.12"
 authors = [
     { name = "raynzz455", email = "raynss455x@gmail.com" }
 ]
@@ -19,17 +19,25 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
     # Database
     "supabase==2.10.0",
-    # PDF + OCR
-    "pdfplumber==0.11.9",
+    # PDF extraction
     "pymupdf>=1.24.0",
-    "pytesseract==0.3.13",
-    "Pillow==11.1.0",
-    # Language detection
-    "pygments>=2.18",
     # Office formats
     "python-docx==1.1.2",
     "python-pptx==1.0.2",
     "openpyxl==3.1.5",
+    # Code detection — multi-layer
+    # Layer 1: Pattern matching (regex, built-in, no dependency)
+    # Layer 2: Pygments lexer validation (~5MB, pure Python)
+    "pygments>=2.18",
+    # Layer 3: ONNX NLP classifier (optional, ~42MB total)
+    # onnxruntime: ~15MB, runs ONNX models on CPU, no GPU needed
+    # tokenizers: ~5MB, Rust-based tokenizer, no Python ML framework
+    # Model file (all-MiniLM-L6-v2 ONNX): ~22MB, downloaded on first use
+    # For Indonesian+multilingual: change MODEL_NAME in nlp_classifier.py
+    # to "paraphrase-multilingual-MiniLM-L12-v2" (~47MB ONNX model)
+    "onnxruntime>=1.16.0",
+    "tokenizers>=0.15.0",
+    "numpy>=1.24.0",
     # Rate limiting + caching
     "slowapi==0.1.9",
     "redis==5.2.1",
@@ -58,14 +66,14 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
