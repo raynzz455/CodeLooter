@@ -2,7 +2,7 @@
 name = "codelooter-backend"
 version = "0.4.0"
 description = "CodeLooter FastAPI backend — extract code blocks from documents with multi-layer accuracy"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 authors = [
     { name = "raynzz455", email = "raynss455x@gmail.com" }
 ]
@@ -22,6 +22,10 @@ dependencies = [
     # PDF extraction
     "pymupdf>=1.24.0",
     # Office formats
+    # NOTE: python-pptx pulls in pillow. Pillow <11.2 does not support Python 3.14
+    # and has no prebuilt Windows wheels for 3.14. We pin Python <3.14 to avoid
+    # source compilation (which requires zlib C headers on Windows).
+    # If you need Python 3.14+, upgrade pillow to >=11.2.0 and update python-pptx.
     "python-docx==1.1.2",
     "python-pptx==1.0.2",
     "openpyxl==3.1.5",
