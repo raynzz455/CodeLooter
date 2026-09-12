@@ -21,6 +21,11 @@ export const metadata: Metadata = {
   description:
     "Ambil semua kode dari PDF, DOCX, PPTX, dan format lainnya secara instan. Tanpa AI, tanpa menunggu.",
   keywords: ["code extractor", "pdf to code", "docx parser", "ekstrak kode"],
+  icons: {
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+    shortcut: "/logo.jpg",
+  },
 };
 
 export default function RootLayout({
